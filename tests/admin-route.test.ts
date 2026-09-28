@@ -1,6 +1,7 @@
 import { exports as workerExports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { env } from "./test-env";
+import { handleStartCommand } from "../src/telegram/flows";
 
 const worker = workerExports as unknown as {
   default: { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
@@ -55,6 +56,49 @@ describe("Admin Mini App HTTP surface", () => {
       headers: { "X-Telegram-Init-Data": initData },
     });
     expect(response.status).toBe(403);
+  });
+
+  it("does not launch the Admin Mini App for support", async () => {
+    const supportTelegramId = 940000020;
+    const supportUserId = crypto.randomUUID();
+    await seedAdminUser(supportUserId, supportTelegramId, "support");
+
+    const sent: Array<Record<string, unknown>> = [];
+    const fakeFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      sent.push(body);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 999 } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+    try {
+      await handleStartCommand(env, "https://example.test", supportUserId, supportTelegramId, 123, "/admin", "2026-09-28T12:00:00Z");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(sent[0]?.text).toBeTruthy();
+    expect(JSON.stringify(sent[0])).not.toContain('"web_app"');
+  });
+
+  it("launches the Admin Mini App for owner", async () => {
+    const ownerTelegramId = 940000021;
+    const ownerUserId = crypto.randomUUID();
+    await seedAdminUser(ownerUserId, ownerTelegramId, "owner");
+
+    const sent: Array<Record<string, unknown>> = [];
+    const fakeFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      sent.push(body);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1000 } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+    try {
+      await handleStartCommand(env, "https://example.test", ownerUserId, ownerTelegramId, 123, "/admin", "2026-09-28T12:00:00Z");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(JSON.stringify(sent[0])).toContain('"web_app"');
   });
 
   it("loads the server-side role and enforces permission checks", async () => {
