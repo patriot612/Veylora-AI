@@ -30,7 +30,7 @@ const PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
   ]),
   admin: new Set([
     "dashboard.read","users.read","users.write","models.read","models.write",
-    "providers.read","providers.write","roles.write","templates.write",
+    "providers.read","providers.write","credentials.write","roles.write","templates.write",
     "plans.write","payments.read","payments.refund","search.read","search.write","statistics.read","queue.read",
   ]),
   support: new Set(["dashboard.read","users.read","payments.read","search.read","statistics.read","queue.read","audit.read"]),
