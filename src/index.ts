@@ -76,8 +76,8 @@ export default {
         }
 
         if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
-          const command = extractMessageText(update) ?? "";
-          if (command.startsWith("/buy ")) {
+          const command = extractMessageText(update);
+          if (typeof command === "string" && command.startsWith("/buy ")) {
             const planId = command.slice("/buy ".length).trim();
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
             const invoice = await createPlanInvoice({
@@ -147,11 +147,11 @@ export default {
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
             await handleVoiceTextWhileActive(env.TELEGRAM_BOT_TOKEN, envelope.chat_id);
           } else {
-          if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("telegram_chat_runtime_secrets_missing");
-          const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
-          const send = (text: string, options?: Parameters<typeof sendTelegramMessage>[3]) => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, text, options);
-          const edit = (messageId: number, text: string, options?: Parameters<typeof editTelegramMessage>[4]) => editTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, messageId, text, options);
-          await handleChatMessage({ db: env.DB, gateway, userId: user.id, text: envelope.text, telegramUpdateId: envelope.update_id, chatId: envelope.chat_id, messageId: envelope.message_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY, send, edit });
+            if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("telegram_chat_runtime_secrets_missing");
+            const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
+            const send = (text: string, options?: Parameters<typeof sendTelegramMessage>[3]) => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, text, options);
+            const edit = (messageId: number, text: string, options?: Parameters<typeof editTelegramMessage>[4]) => editTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, messageId, text, options);
+            await handleChatMessage({ db: env.DB, gateway, userId: user.id, text: envelope.text, telegramUpdateId: envelope.update_id, chatId: envelope.chat_id, messageId: envelope.message_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY, send, edit });
           }
         }
 
