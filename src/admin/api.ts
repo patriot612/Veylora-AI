@@ -168,19 +168,20 @@ async function providers(env: Env, request: Request, session: AdminSession, segm
     const provider = await env.DB.prepare("SELECT id FROM providers WHERE id=?1").bind(providerId).first<{id:string}>();
     if (!provider) return Response.json({ error: "provider_not_found" }, { status: 404, headers: noStore() });
     if (request.method === "POST" && typeof body.secret !== "string") return Response.json({ error: "credential_secret_required" }, { status: 400, headers: noStore() });
+    if (!env.CREDENTIAL_ENCRYPTION_KEY) return Response.json({ error: "credential_encryption_not_configured" }, { status: 503, headers: noStore() });
 
     if (request.method === "PUT") {
       const existing = await env.DB.prepare("SELECT encrypted_secret,key_version FROM credentials WHERE id=?1 AND provider_id=?2").bind(credentialId, providerId).first<{encrypted_secret:string;key_version:number}>();
       if (!existing) return Response.json({ error: "credential_not_found" }, { status: 404, headers: noStore() });
       const encrypted = typeof body.secret === "string" && body.secret.length > 0
-        ? await encryptCredentialSecret(body.secret, env.CREDENTIAL_ENCRYPTION_KEY)
+        ? await encryptCredentialSecret(body.secret, env.CREDENTIAL_ENCRYPTION_KEY as string)
         : existing.encrypted_secret;
       const result = await env.DB.prepare("UPDATE credentials SET name=?3,encrypted_secret=?4,key_version=?5,enabled=?6,updated_at=?7 WHERE id=?1 AND provider_id=?2")
         .bind(credentialId, providerId, body.name.trim(), encrypted, existing.key_version, enabled, new Date().toISOString()).run();
       if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "credential_update_failed" }, { status: 409, headers: noStore() });
     } else {
       if (typeof body.secret !== "string" || body.secret.length === 0) return Response.json({ error: "credential_secret_required" }, { status: 400, headers: noStore() });
-      const encrypted = await encryptCredentialSecret(body.secret, env.CREDENTIAL_ENCRYPTION_KEY);
+      const encrypted = await encryptCredentialSecret(body.secret, env.CREDENTIAL_ENCRYPTION_KEY as string);
       await env.DB.prepare("INSERT INTO credentials (id,provider_id,name,encrypted_secret,key_version,enabled,created_at,updated_at) VALUES (?1,?2,?3,?4,1,?5,?6,?6)")
         .bind(credentialId, providerId, body.name.trim(), encrypted, enabled, new Date().toISOString()).run();
     }
