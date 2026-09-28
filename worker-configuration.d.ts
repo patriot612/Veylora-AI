@@ -5,4 +5,5 @@ interface Env {
   TEST_MIGRATIONS: D1Migration[];
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
+  CREDENTIAL_ENCRYPTION_KEY?: string;
 }
