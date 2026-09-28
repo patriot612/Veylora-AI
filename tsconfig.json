@@ -9,8 +9,8 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "WebWorker"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"],
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "worker-configuration.d.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "tests/**/*.d.ts", "worker-configuration.d.ts"]
 }
