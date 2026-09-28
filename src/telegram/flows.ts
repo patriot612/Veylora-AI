@@ -705,7 +705,8 @@ async function deliverSearchOutcome(env: Env, userId: string, chatId: number, ou
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
       }
       telegramDelivered = true;
-      if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");\n      const prefs = await getUiPreferences(env.DB, userId); delete prefs.lastSearchQuery; await setUiPreferences(env.DB, userId, prefs);
+      if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");
+      const prefs = await getUiPreferences(env.DB, userId); delete prefs.lastSearchQuery; await setUiPreferences(env.DB, userId, prefs);
     } catch (error) {
       if (!telegramDelivered) {
         await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
