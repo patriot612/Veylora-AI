@@ -26,11 +26,13 @@ describe("Telegram webhook integration", () => {
 
   it("rate-limits a user within the configured minute bucket", async () => {
     const userId = 987654322;
+    await env.DB.prepare("DELETE FROM telegram_updates WHERE update_id IN (85101,85102)").run();
     await env.DB.prepare("INSERT INTO system_config(config_key,config_value,updated_at) VALUES ('limits.telegram_updates_per_minute','1','2026-09-28T12:00:00Z') ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value,updated_at=excluded.updated_at").run();
     const headers = { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "test-secret" };
     const first = await worker.default.fetch("https://example.test/telegram/webhook", { method: "POST", headers, body: JSON.stringify({ update_id: 85101, message: { from: { id: userId, first_name: "Rate" }, text: "/start" } }) });
     const second = await worker.default.fetch("https://example.test/telegram/webhook", { method: "POST", headers, body: JSON.stringify({ update_id: 85102, message: { from: { id: userId, first_name: "Rate" }, text: "/start" } }) });
     expect(first.status).toBe(200);
+    expect((await first.clone().json() as { duplicate?: boolean }).duplicate).not.toBe(true);
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as { ok?: boolean; rate_limited?: boolean };
     expect(secondBody).toEqual({ ok: true, rate_limited: true });
