@@ -12,6 +12,7 @@ export default defineConfig({
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations(path.resolve("migrations")),
           TELEGRAM_WEBHOOK_SECRET: "test-secret",
+          TELEGRAM_BOT_TOKEN: "test-bot-token",
         },
       },
     }),
