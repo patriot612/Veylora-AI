@@ -28,10 +28,6 @@ describe("Search Gateway", () => {
   });
 
   it("builds config with env primary fallback when D1 config is absent", async () => {
-    const values = new Map<string, string>([
-      ["search.enabled", "1"],
-      ["search.max_query_chars", "1200"],
-    ]);
     const db = {
       prepare(sql: string) {
         return {
