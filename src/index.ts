@@ -6,6 +6,7 @@ import { completeSearchDelivery, executeSearch, releaseSearchDelivery } from "./
 import { claimTelegramUpdate, markTelegramUpdate, upsertTelegramUser } from "./db/telegram";
 import { hasValidWebhookSecret, isTelegramWebhookPath, jsonResponse } from "./http";
 import { editTelegramMessage, sendTelegramMessage } from "./telegram/api";
+import { handleImageText, handleSearchText, handleStartCommand, handleTelegramCallback } from "./telegram/flows";
 import { classifyTelegramUpdate } from "./telegram/router";
 import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
@@ -89,14 +90,20 @@ export default {
         }
         if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
           const command = extractMessageText(update);
+          if (typeof command === "string") await handleStartCommand(env, request.url, user.id, user.telegramUserId, envelope.chat_id, command, now);
           if (typeof command === "string" && command.startsWith("/buy ")) {
             const planId = command.slice("/buy ".length).trim();
-            if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
-            const invoice = await createPlanInvoice({ db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN, userId: user.id, chatId: envelope.chat_id, planId, now });
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.");
+            const invoice = await createPlanInvoice({ db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN!, userId: user.id, chatId: envelope.chat_id, planId, now });
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.");
           }
-          if (typeof command === "string" && command === "/documents") { await enterDocumentsMode(env.DB, user.id, now); if (env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Documents mode включён. Отправьте PDF/DOCX/TXT до 10 МБ."); }
-          if (typeof command === "string" && command === "/voice") { if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing"); const mode = await enterVoiceMode(env.DB, user.id, now); await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, mode.ok ? "Voice Mode включён. Отправьте голосовое сообщение." : "Voice Mode доступен только по активной подписке."); }
+          if (typeof command === "string" && command === "/documents") {
+            await enterDocumentsMode(env.DB, user.id, now);
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, "Documents mode включён. Отправьте PDF/DOCX/TXT до 10 МБ.");
+          }
+          if (typeof command === "string" && command === "/voice") {
+            const mode = await enterVoiceMode(env.DB, user.id, now);
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, mode.ok ? "Voice Mode включён. Отправьте голосовое сообщение." : "Voice Mode доступен только по активной подписке.");
+          }
         }
         if (envelope.kind === "document" && envelope.document && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
@@ -105,7 +112,11 @@ export default {
         }
         if (envelope.kind === "text" && typeof envelope.text === "string" && typeof envelope.chat_id === "number" && typeof envelope.message_id === "number") {
           const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
-          if (activeMode?.active_mode === "documents") {
+          if (activeMode?.active_mode === "image") {
+            await handleImageText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
+          } else if (activeMode?.active_mode === "search") {
+            await handleSearchText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
+          } else if (activeMode?.active_mode === "documents") {
             if (!env.CREDENTIAL_ENCRYPTION_KEY || !env.TELEGRAM_BOT_TOKEN) throw new Error("document_runtime_secrets_missing");
             const documentModelId = await getSystemConfig(env.DB, "default_chat_model_id");
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
@@ -156,13 +167,9 @@ export default {
           if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? "Voice Mode доступен только по активной подписке." : "Не удалось принять голосовое сообщение. Попробуйте ещё раз.");
           else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "🎙️ Обрабатываю голосовое сообщение...");
         }
-        if (envelope.kind === "callback" && envelope.callbackData?.startsWith("plan_buy:") && typeof envelope.chat_id === "number") {
-          if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
-          const planId = envelope.callbackData.slice("plan_buy:".length);
-          const invoice = await createPlanInvoice({ db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN, userId: user.id, chatId: envelope.chat_id, planId, now });
-          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.");
+        if (envelope.kind === "callback" && typeof envelope.chat_id === "number") {
+          await handleTelegramCallback(env, request.url, user.id, user.telegramUserId, envelope.chat_id, envelope.callbackQueryId, envelope.callbackData ?? "", now);
         }
-        if (envelope.kind === "callback" && envelope.callbackData === "voice_exit" && typeof envelope.chat_id === "number") { await exitVoiceMode(env.DB, user.id, now); if (env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Voice Mode отключён. Вы вернулись в обычный Chat."); }
         const commandText = extractMessageText(update);
         if (envelope.kind === "command" && commandText?.startsWith("/search") && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
