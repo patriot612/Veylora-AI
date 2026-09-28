@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { validateMiniAppInitData } from "../src/admin/auth";
 import { env } from "./test-env";
 
-async function buildInitData(botToken: string, authDate: number, user: Record<string, unknown>) {
+async function buildInitData(botToken: string, authDate: number, user?: Record<string, unknown>) {
   const params = new URLSearchParams();
   params.set("auth_date", String(authDate));
   params.set("query_id", "AA-test");
-  params.set("user", JSON.stringify(user));
+  if (user) params.set("user", JSON.stringify(user));
   const sorted: Array<[string, string]> = [];
   params.forEach((value, key) => sorted.push([key, value]));
   sorted.sort(([a], [b]) => a.localeCompare(b));
@@ -36,9 +36,8 @@ describe("Telegram Mini App initData", () => {
     await expect(validateMiniAppInitData(tampered, "test-bot-token", now)).rejects.toThrow("admin_init_data_invalid");
     const expired = await buildInitData("test-bot-token", now - 90_000, { id: 123456789 });
     await expect(validateMiniAppInitData(expired, "test-bot-token", now)).rejects.toThrow("admin_init_data_expired");
-    const params = new URLSearchParams(valid);
-    params.delete("user");
-    await expect(validateMiniAppInitData(params.toString(), "test-bot-token", now)).rejects.toThrow("admin_user_missing");
+    const missingUser = await buildInitData("test-bot-token", now - 30);
+    await expect(validateMiniAppInitData(missingUser, "test-bot-token", now)).rejects.toThrow("admin_user_missing");
   });
 });
 
