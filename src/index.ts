@@ -11,7 +11,7 @@ import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
 import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
-import { answerDocumentQuestion, enterDocumentsMode, enqueueDocumentUpload, processDocumentUploadJob } from "./documents/service";
+import { answerDocumentQuestion, completeDocumentQuestionDelivery, enterDocumentsMode, enqueueDocumentUpload, processDocumentUploadJob, releaseDocumentQuestionDelivery } from "./documents/service";
 import { createPlanInvoice, settleSuccessfulPayment, validatePreCheckout } from "./payments/service";
 import { runScheduledCleanup } from "./cleanup";
 import { renderAdminApp } from "./admin/app";
@@ -102,8 +102,27 @@ export default {
             const documentModelId = await getSystemConfig(env.DB, "default_chat_model_id");
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
             const result = await answerDocumentQuestion({ db: env.DB, gateway, userId: user.id, question: envelope.text, now, modelId: documentModelId ?? undefined, encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
-            if (result && "answer" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.answer);
-            else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось получить ответ по документу: " + (result as {error:string}).error);
+            if (result && "answer" in result) {
+              try {
+                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.answer);
+                const settled = await completeDocumentQuestionDelivery(env.DB, user.id, result.operationId, new Date().toISOString());
+                if (!settled) throw new Error("document_question_delivery_settlement_failed");
+              } catch (error) {
+                await releaseDocumentQuestionDelivery(
+                  env.DB,
+                  result.operationId,
+                  new Date().toISOString(),
+                  error instanceof Error ? error.message : "telegram_document_question_delivery_failed",
+                ).catch(() => false);
+                await sendTelegramMessage(
+                  env.TELEGRAM_BOT_TOKEN,
+                  envelope.chat_id,
+                  "Не удалось доставить ответ по документу. Баллы за не доставленный ответ не списаны.",
+                ).catch(() => false);
+              }
+            } else {
+              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось получить ответ по документу: " + (result as {error:string}).error);
+            }
           } else if (activeMode?.active_mode === "voice") {
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
             await handleVoiceTextWhileActive(env.TELEGRAM_BOT_TOKEN, envelope.chat_id);
