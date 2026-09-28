@@ -1,0 +1,31 @@
+{
+  "name": "veylora-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Production-oriented Telegram AI Bot on Cloudflare Workers, D1 and Queues.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "cf:types": "wrangler types"
+  },
+  "dependencies": {
+    "grammy": "1.46.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260927.1",
+    "@typescript-eslint/eslint-plugin": "8.70.1",
+    "@typescript-eslint/parser": "8.70.1",
+    "eslint": "10.11.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2",
+    "wrangler": "4.141.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
