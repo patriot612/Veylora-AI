@@ -1,4 +1,5 @@
-import { getSystemConfig } from "../config";
+import { getSystemConfig, getSystemConfigInt } from "../config";
+import { getSearchProviderConfig, searchViaGateway } from "./gateway";
 import { reservePoints, releaseReservation, settleReservation } from "../billing/points";
 import { listSelectableModels } from "../models/registry";
 import { createOperation } from "../operations/service";
@@ -25,7 +26,9 @@ const EDITOR_TIMEOUT_MS = 120 * 1000;
 
 export async function executeSearch(input: SearchServiceInput): Promise<SearchOutcome> {
   const query = input.query.trim();
-  if (!query || query.length > MAX_QUERY_CHARS) throw new Error("invalid_search_query");
+  const configuredMaxQueryChars = await getSystemConfigInt(input.db, "search.max_query_chars", MAX_QUERY_CHARS);
+  const maxQueryChars = Math.max(100, Math.min(5000, configuredMaxQueryChars));
+  if (!query || query.length > maxQueryChars) throw new Error("invalid_search_query");
   const model = await selectSearchModel(input.db, input.userId, input.now, input.modelId);
   if (!model) throw new Error("search_model_unavailable");
 
@@ -47,10 +50,13 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
     return { kind: "insufficient_points" };
   }
   await input.db.prepare("UPDATE operations SET status = 'processing', started_at = ?2 WHERE id = ?1 AND user_id = ?3 AND status = 'reserved'").bind(operationId, input.now, input.userId).run();
-  const deadline = Date.now() + SEARCH_TIMEOUT_MS;
+  const searchTimeoutSeconds = await getSystemConfigInt(input.db, "limits.search_timeout_seconds", SEARCH_TIMEOUT_MS / 1000);
+  const deadline = Date.now() + Math.max(1, Math.min(5 * 60, searchTimeoutSeconds)) * 1000;
 
   try {
-    const results = await searchSearxng(input.searxngUrl, query, input.fetchImpl ?? fetch, Math.min(SEARXNG_TIMEOUT_MS, Math.max(1, deadline - Date.now())));
+    const searchConfig = await getSearchProviderConfig(input.db, input.searxngUrl);
+    const payload = await searchViaGateway(searchConfig, query, input.fetchImpl ?? fetch, Math.min(SEARXNG_TIMEOUT_MS, Math.max(1, deadline - Date.now())));
+    const results = normalizeResults(payload);
     if (results.length === 0) {
       await releaseReservation(input.db, operationId, new Date().toISOString());
       return { kind: "no_result", operationId };
@@ -120,15 +126,8 @@ export async function releaseSearchDelivery(db: D1Database, operationId: string,
 }
 
 export async function searchSearxng(baseUrl: string, query: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<SearchResult[]> {
-  const url = new URL("/search", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
-  url.searchParams.set("q", query); url.searchParams.set("format", "json"); url.searchParams.set("categories", "general");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort("search_timeout"), timeoutMs);
-  try {
-    const response = await fetchImpl(url, { method: "GET", headers: { accept: "application/json" }, signal: controller.signal });
-    if (!response.ok) throw new Error(`searxng_http_${response.status}`);
-    return normalizeResults(await response.json());
-  } finally { clearTimeout(timer); }
+  const payload = await searchViaGateway({ primaryUrl: baseUrl, enabled: true, maxQueryChars: MAX_QUERY_CHARS }, query, fetchImpl, timeoutMs);
+  return normalizeResults(payload);
 }
 
 function normalizeResults(payload: unknown): SearchResult[] {
