@@ -22,7 +22,7 @@ describe("scheduled cleanup", () => {
       env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'active','2026-09-29T00:00:00Z')").bind(crypto.randomUUID(), activeSession),
     ]);
 
-    await worker.scheduled({ cron: "0 * * * *", scheduledTime: Date.parse("2026-09-28T00:00:00Z"), type: "scheduled" } as ScheduledController, env);
+    await worker.scheduled({ cron: "0 * * * *", scheduledTime: Date.parse("2026-09-28T00:00:00Z"), type: "scheduled", noRetry: () => undefined } as ScheduledController, env);
 
     const expiredOwner = await env.DB.prepare("SELECT active_document_session_id FROM users WHERE id=?1").bind(expiredUser).first<{active_document_session_id:string|null}>();
     const activeOwner = await env.DB.prepare("SELECT active_document_session_id FROM users WHERE id=?1").bind(activeUser).first<{active_document_session_id:string|null}>();
