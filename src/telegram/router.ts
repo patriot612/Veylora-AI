@@ -37,7 +37,7 @@ export function classifyTelegramUpdate(update: Record<string, unknown>): Telegra
     const chatId = isRecord(message.chat) && typeof message.chat.id === "number" ? message.chat.id : undefined;
     const messageId = typeof message.message_id === "number" && Number.isInteger(message.message_id) ? message.message_id : undefined;
     const meta = { ...(chatId !== undefined ? { chat_id: chatId } : {}), ...(messageId !== undefined ? { message_id: messageId } : {}) };
-    if (text?.startsWith("/")) return { update_id: updateId, user, kind: "command", ...meta, ...(text !== undefined ? { text } : {}) };
+    if (text?.startsWith("/")) return { update_id: updateId, user, kind: "command", ...meta };
     if (text) return { update_id: updateId, user, kind: "text", ...meta, text };
     if (isRecord(message.document)) return { update_id: updateId, user, kind: "document", ...meta };
     if (Array.isArray(message.photo)) return { update_id: updateId, user, kind: "photo", ...meta };
