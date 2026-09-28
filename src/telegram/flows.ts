@@ -7,7 +7,7 @@ import { enterDocumentsMode } from "../documents/service";
 import { enterVoiceMode } from "../voice/service";
 import { answerTelegramCallbackQuery, deleteTelegramMessage, editTelegramMessage, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
-import { getUserLocale, t } from "../i18n";
+import { getUserLocale, normalizeLocale, t } from "../i18n";
 import { getSystemConfigInt } from "../config";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
 import { createAIGateway } from "../ai-gateway";
@@ -536,12 +536,13 @@ export async function handleTelegramCallback(
     const language = data.slice("lang:".length);
     if (!["ru", "en", "uz", "fr", "de"].includes(language)) throw new Error("invalid_language");
     await env.DB.prepare("UPDATE users SET language=?2,updated_at=?3 WHERE id=?1").bind(userId, language, now).run();
-    await sendTelegramMessage(botToken, chatId, "Язык сохранён.", { reply_markup: accountKeyboard(locale) });
+    const nextLocale = normalizeLocale(language);
+    await sendTelegramMessage(botToken, chatId, t(nextLocale, "common.saved"), { reply_markup: accountKeyboard(nextLocale) });
     return true;
   }
 
   if (data === "menu:help") {
-    await sendTelegramMessage(botToken, chatId, "❓ Помощь\n\nChat — обычный диалог. Search — интернет-поиск с источниками. Documents — вопросы по PDF/DOCX/TXT. Voice — голосовые ответы по активной подписке. /paysupport — поддержка платежей.", { reply_markup: mainMenuKeyboard(false, locale) });
+    await sendTelegramMessage(botToken, chatId, t(locale, "help.text"), { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
