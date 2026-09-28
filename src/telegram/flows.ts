@@ -72,6 +72,7 @@ export async function handleTelegramCallback(
 ): Promise<boolean> {
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) throw new Error("telegram_bot_token_missing");
+  const locale = await getUserLocale(env.DB, userId);
   if (callbackId) await answerTelegramCallbackQuery(botToken, callbackId).catch(() => false);
 
   if (data.startsWith("plan_buy:")) {
@@ -184,7 +185,7 @@ export async function handleTelegramCallback(
       return true;
     }
     const ok = await setChatModel(env.DB, userId, modelId, now);
-    await sendTelegramMessage(botToken, chatId, ok ? "Модель Chat изменена." : "Модель недоступна.", { reply_markup: mainMenuKeyboard(false) });
+    await sendTelegramMessage(botToken, chatId, ok ? "Модель Chat изменена." : "Модель недоступна.", { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
