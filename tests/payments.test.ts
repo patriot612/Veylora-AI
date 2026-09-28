@@ -126,4 +126,36 @@ describe("Telegram Stars payments", () => {
     expect(payments?.count).toBe(1);
     expect(subscriptions?.count).toBe(1);
   });
+
+  it("handles concurrent payment callbacks as one subscription", async () => {
+    const { userId, telegramUserId } = await seedPaymentUser();
+    const orderId = crypto.randomUUID();
+    const payload = "veylora:order:" + orderId;
+    await env.DB.prepare(
+      "INSERT INTO orders (id,user_id,plan_id,status,amount,currency,provider,created_at) VALUES (?1,?2,'plan_month','pending',91,'XTR','telegram_stars','2026-09-28T12:00:00Z')",
+    ).bind(orderId, userId).run();
+
+    const input = {
+      db: env.DB,
+      userId,
+      telegramUserId,
+      currency: "XTR" as const,
+      totalAmount: 91,
+      invoicePayload: payload,
+      telegramPaymentChargeId: "charge-concurrent",
+      now: "2026-09-28T12:00:00Z",
+    };
+    const results = await Promise.all([
+      settleSuccessfulPayment(input),
+      settleSuccessfulPayment(input),
+    ]);
+
+    expect(results.filter((result) => "duplicate" in result && result.duplicate === false).length).toBe(1);
+    expect(results.filter((result) => "duplicate" in result && result.duplicate === true).length).toBe(1);
+    const payments = await env.DB.prepare("SELECT COUNT(*) AS count FROM payments WHERE order_id=?1").bind(orderId).first<{count:number}>();
+    const subscriptions = await env.DB.prepare("SELECT COUNT(*) AS count FROM subscriptions WHERE user_id=?1 AND status='active'").bind(userId).first<{count:number}>();
+    expect(payments?.count).toBe(1);
+    expect(subscriptions?.count).toBe(1);
+  });
+
 });
