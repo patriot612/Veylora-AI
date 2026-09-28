@@ -75,4 +75,17 @@ describe('D1 billing lifecycle', () => {
     expect(user?.daily_points_remaining).toBe(30);
     expect(user?.daily_billing_day).toBe('2026-09-29');
   });
+
+  it('does not restore an expired daily reservation into the next billing day', async () => {
+    const userId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    await seedUser(userId, 50, '2026-09-28');
+    await seedOperation(operationId, userId);
+    expect((await reservePoints(env.DB, userId, operationId, 20, '2026-09-28T12:00:00.000Z')).ok).toBe(true);
+    await env.DB.prepare("UPDATE users SET daily_billing_day='2026-09-29',daily_points_remaining=50 WHERE id=?1").bind(userId).run();
+    expect(await releaseReservation(env.DB, operationId, '2026-09-29T00:05:00.000Z')).toBe(true);
+    const user = await env.DB.prepare('SELECT daily_points_remaining, bonus_points FROM users WHERE id=?1').bind(userId).first<{ daily_points_remaining: number; bonus_points: number }>();
+    expect(user?.daily_points_remaining).toBe(50);
+    expect(user?.bonus_points).toBe(0);
+  });
 });
