@@ -81,13 +81,14 @@ describe("Chat service", () => {
     expect(h.edited).toEqual(["Ответ модели"]);
 
     const user = await env.DB.prepare("SELECT daily_points_remaining, active_operation_id, active_conversation_id FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number; active_operation_id:string|null; active_conversation_id:string|null}>();
-    const op = await env.DB.prepare("SELECT status, points_cost FROM operations WHERE id=?1").bind((result as any).operationId).first<{status:string;points_cost:number}>();
+    const op = await env.DB.prepare("SELECT status, points_cost, telegram_delivery_status FROM operations WHERE id=?1").bind((result as any).operationId).first<{status:string;points_cost:number;telegram_delivery_status:string}>();
     const turns = await env.DB.prepare("SELECT COUNT(*) AS count FROM conversation_turns WHERE conversation_id=?1").bind((result as any).conversationId).first<{count:number}>();
 
     expect(user?.daily_points_remaining).toBe(46);
     expect(user?.active_operation_id).toBeNull();
     expect(user?.active_conversation_id).toBe((result as any).conversationId);
     expect(op?.status).toBe("succeeded");
+    expect(op?.telegram_delivery_status).toBe("sent");
     expect(op?.points_cost).toBe(4);
     expect(turns?.count).toBe(1);
   });
