@@ -225,8 +225,32 @@ async function plans(env: Env, request: Request, session: AdminSession, segments
 }
 
 async function payments(env: Env, request: Request, session: AdminSession, segments: string[]) {
-  const rows = await env.DB.prepare("SELECT o.id,o.user_id,o.plan_id,o.status,o.amount,o.currency,o.provider,o.telegram_payment_charge_id,o.created_at,o.paid_at,o.refunded_at FROM orders o ORDER BY o.created_at DESC LIMIT 200").all();
-  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+  if (request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT o.id,o.user_id,u.telegram_user_id,o.plan_id,o.status,o.amount,o.currency,o.provider,o.telegram_payment_charge_id,o.created_at,o.paid_at,o.refunded_at FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 200").all();
+    return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+  }
+  if (request.method !== "POST" || segments.length !== 2 || segments[1] !== "refund") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
+  assertPermission(session, "payments.refund");
+  const orderId = segments[0];
+  const order = await env.DB.prepare("SELECT o.id,o.user_id,u.telegram_user_id,o.plan_id,o.status,o.telegram_payment_charge_id FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?1").bind(orderId).first<{id:string;user_id:string;telegram_user_id:number;plan_id:string;status:string;telegram_payment_charge_id:string|null}>();
+  if (!order) return Response.json({ error: "order_not_found" }, { status: 404, headers: noStore() });
+  if (order.status === "refunded") return Response.json({ ok: true, duplicate: true }, { headers: noStore() });
+  if (order.status !== "paid" || !order.telegram_payment_charge_id) return Response.json({ error: "order_not_refundable" }, { status: 409, headers: noStore() });
+  if (!env.TELEGRAM_BOT_TOKEN) return Response.json({ error: "telegram_not_configured" }, { status: 503, headers: noStore() });
+  try {
+    await refundTelegramStarPayment(env.TELEGRAM_BOT_TOKEN, order.telegram_user_id, order.telegram_payment_charge_id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "refund_failed";
+    if (!/already refunded|already_refunded|CHARGE_ALREADY_REFUNDED/i.test(message)) return Response.json({ error: "telegram_refund_failed" }, { status: 502, headers: noStore() });
+  }
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE orders SET status='refunded',refunded_at=?2 WHERE id=?1 AND status='paid'").bind(orderId, now),
+    env.DB.prepare("UPDATE payments SET status='refunded' WHERE order_id=?1 AND status='paid'").bind(orderId),
+    env.DB.prepare("UPDATE subscriptions SET status='refunded',updated_at=?2 WHERE user_id=?1 AND plan_id=?3 AND status='active'").bind(order.user_id, now, order.plan_id),
+  ]);
+  await writeAudit(env.DB, order.user_id, "payment.refund", "order", orderId, session.role);
+  return Response.json({ ok: true }, { headers: noStore() });
 }
 async function search(env: Env) {
   const rows = await env.DB.prepare(
