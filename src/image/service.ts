@@ -151,6 +151,13 @@ export async function processImageJob(message: {
     return { ok: false, retryable: true, code: error instanceof Error ? error.message : "image_generation_failed" };
   }
 
+  if (result.bytes) {
+    const maxBytes = await getSystemConfigInt(deps.db, "limits.image_bytes", 10 * 1024 * 1024);
+    if (result.bytes.byteLength > maxBytes) {
+      return { ok: false, retryable: false, code: "image_too_large" };
+    }
+  }
+
   await transitionOperation(deps.db, {
     operationId: message.operationId,
     userId: message.userId,
