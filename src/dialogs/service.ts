@@ -193,7 +193,7 @@ export async function setChatModel(
       "UPDATE users SET active_chat_model_id=?2,active_role_id=NULL,updated_at=?3 WHERE id=?1",
     ).bind(userId, modelId, now),
     db.prepare(
-      "UPDATE conversations SET role_id=NULL,updated_at=?3 WHERE id=(SELECT active_conversation_id FROM users WHERE id=?1) AND user_id=?1 AND archived_at IS NULL AND deleted_at IS NULL",
+      "UPDATE conversations SET role_id=NULL,updated_at=?2 WHERE id=(SELECT active_conversation_id FROM users WHERE id=?1) AND user_id=?1 AND archived_at IS NULL AND deleted_at IS NULL",
     ).bind(userId, now),
   ]);
 
