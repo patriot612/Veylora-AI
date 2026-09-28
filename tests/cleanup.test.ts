@@ -59,9 +59,14 @@ describe("scheduled cleanup", () => {
 
   it("deletes conversation history after retention expires", async () => {
     const userId = crypto.randomUUID();
-    const modelId = "model_gpt_5_6";
+    const modelId = "cleanup_model_" + crypto.randomUUID();
+    const providerId = "cleanup_provider_" + crypto.randomUUID();
+    const credentialId = "cleanup_credential_" + crypto.randomUUID();
     const conversationId = crypto.randomUUID();
     await env.DB.batch([
+      env.DB.prepare("INSERT INTO providers (id,name,adapter_type,endpoint,enabled,created_at,updated_at) VALUES (?1,'Cleanup Provider','test','https://provider.test/v1',1,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(providerId),
+      env.DB.prepare("INSERT INTO credentials (id,provider_id,name,encrypted_secret,enabled,created_at,updated_at) VALUES (?1,?2,'Cleanup Credential','test',1,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(credentialId, providerId),
+      env.DB.prepare("INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) VALUES (?1,'family_gpt',?2,?3,'cleanup','Cleanup Test','chat',1,0,8000,1000,'{}',1,'{}','2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(modelId, providerId, credentialId),
       env.DB.prepare("INSERT INTO users (id,telegram_user_id,daily_billing_day,active_conversation_id,active_chat_model_id,created_at,updated_at) VALUES (?1,?2,'2026-09-28',?3,?4,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(userId, 980000004, conversationId, modelId),
       env.DB.prepare("INSERT INTO conversations (id,user_id,title,model_id,created_at,updated_at,expires_at) VALUES (?1,?2,'Expired dialog',?3,'2026-09-27T00:00:00Z','2026-09-27T01:00:00Z','2026-09-27T23:59:00Z')").bind(conversationId, userId, modelId),
       env.DB.prepare("INSERT INTO conversation_turns (id,conversation_id,user_text,assistant_text,model_id,created_at,updated_at) VALUES (?1,?2,'hello','world',?3,'2026-09-27T01:00:00Z','2026-09-27T01:00:00Z')").bind(crypto.randomUUID(), conversationId, modelId),
