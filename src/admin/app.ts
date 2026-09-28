@@ -38,7 +38,7 @@ async function render(tab){
    const rows=data.rows||[];
    if(tab==="dashboard"){
       app.innerHTML='<div class="grid">'+
-       [['Users',data.users],['Operations 24h',data.operations24h],['Queue pending',data.queuePending],['Subscriptions',data.activeSubscriptions],['Stars 24h',data.stars24h]].map(x=>'<div class="card"><div class="muted">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>').join('')+
+       [['Users',data.users],['DAU',data.dau],['New users 24h',data.newUsers24h],['Operations 24h',data.operations24h],['Success %',data.successRate],['Errors 24h',data.errorCount24h],['Timeouts 24h',data.timeoutCount24h],['Subscriptions',data.activeSubscriptions],['Stars 24h',data.stars24h],['Points captured',data.pointsCaptured24h],['Points released',data.pointsReleased24h],['Queue pending',data.queuePending],['Search errors',data.searchErrors24h],['Provider errors',data.providerErrors24h]].map(x=>'<div class="card"><div class="muted">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>').join('')+
        '</div>';
       return;
    }
