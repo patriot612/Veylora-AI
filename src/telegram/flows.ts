@@ -201,7 +201,7 @@ export async function handleTelegramCallback(
     const templateId = typeof prefs.imageTemplateId === "string" ? prefs.imageTemplateId : "";
     const template = templateId ? await env.DB.prepare("SELECT extra_points_cost FROM image_templates WHERE id=?1 AND enabled=1").bind(templateId).first<{extra_points_cost:number}>() : null;
     const total = model.points_cost + (template?.extra_points_cost ?? 0);
-    await sendTelegramMessage(botToken, chatId, model.display_name + " · " + total + " б.\nОтправьте описание изображения.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.selected", { model: model.display_name, cost: total }));
     return true;
   }
 
@@ -505,7 +505,7 @@ export async function handleTelegramCallback(
 
   if (data === "tool:chat") {
     await setMode(env.DB, userId, "chat", now);
-    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
+    await sendTelegramMessage(botToken, chatId, t(locale, "mode.chat"), { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
