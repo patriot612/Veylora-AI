@@ -1,4 +1,3 @@
-import { getActivePlan, activateSubscription } from "../subscriptions";
 import { sendTelegramInvoice, answerPreCheckoutQuery } from "../telegram/api";
 
 type OrderRow = {
