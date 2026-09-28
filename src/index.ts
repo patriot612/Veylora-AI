@@ -44,12 +44,12 @@ export default {
           await handleChatMessage({ db: env.DB, gateway, userId: user.id, text: envelope.text, telegramUpdateId: envelope.update_id, chatId: envelope.chat_id, messageId: envelope.message_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY, send, edit });
         }
 
-        if (envelope.kind === "command" && typeof envelope.text === "string" && envelope.text.startsWith("/search") && typeof envelope.chat_id === "number") {
+        const commandText = extractMessageText(update);
+        if (envelope.kind === "command" && commandText?.startsWith("/search") && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
-          const query = envelope.text.slice("/search".length).trim();
-          if (!query) {
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Использование: /search <запрос>");
-          } else {
+          const query = commandText.slice("/search".length).trim();
+          if (!query) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Использование: /search <запрос>");
+          else {
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
             const outcome = await executeSearch({ db: env.DB, gateway, userId: user.id, query, telegramUpdateId: envelope.update_id, now, searxngUrl: env.SEARXNG_URL, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
             const message = outcome.kind === "answered" ? outcome.text : outcome.kind === "no_result" ? "Результат не найден. Попробуйте изменить запрос." : outcome.kind === "insufficient_points" ? "У вас закончились баллы для Search Mode." : "Не удалось выполнить поиск. Попробуйте ещё раз.";
@@ -72,3 +72,10 @@ export default {
   },
   async scheduled(_controller: ScheduledController, _env: Env): Promise<void> {},
 } satisfies ExportedHandler<Env>;
+
+function extractMessageText(update: Record<string, unknown>): string | undefined {
+  const message = update.message;
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return undefined;
+  const text = (message as Record<string, unknown>).text;
+  return typeof text === "string" ? text : undefined;
+}
