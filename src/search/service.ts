@@ -41,7 +41,10 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
   }
 
   const reservation = await reservePoints(input.db, input.userId, operationId, model.pointsCost, input.now);
-  if (!reservation.ok) return { kind: "insufficient_points" };
+  if (!reservation.ok) {
+    await dbFailSearchOperation(input.db, operationId, input.userId, input.now, reservation.reason);
+    return { kind: "insufficient_points" };
+  }
   await input.db.prepare("UPDATE operations SET status = 'processing', started_at = ?2 WHERE id = ?1 AND user_id = ?3 AND status = 'reserved'").bind(operationId, input.now, input.userId).run();
   const deadline = Date.now() + SEARCH_TIMEOUT_MS;
 
@@ -75,6 +78,11 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
     await releaseReservation(input.db, operationId, now, code === "search_timeout" ? "timeout" : "failed", code);
     return { kind: "failed", operationId, code };
   }
+}
+
+
+async function dbFailSearchOperation(db: D1Database, operationId: string, userId: string, now: string, reason: string): Promise<void> {
+  await db.prepare("UPDATE operations SET status='failed', error_code=?3, finished_at=?4 WHERE id=?1 AND user_id=?2 AND status='created'").bind(operationId, userId, reason, now).run();
 }
 
 async function selectSearchModel(db: D1Database, userId: string, now: string) {
