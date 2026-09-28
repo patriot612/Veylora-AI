@@ -1,6 +1,6 @@
 import { env } from "./test-env";
 import { describe, expect, it } from "vitest";
-import { enqueueDocumentUpload, processDocumentUploadJob, answerDocumentQuestion, enterDocumentsMode } from "../src/documents/service";
+import { completeDocumentQuestionDelivery, enqueueDocumentUpload, processDocumentUploadJob, answerDocumentQuestion, enterDocumentsMode, releaseDocumentQuestionDelivery } from "../src/documents/service";
 import { encryptCredentialSecret } from "../src/security/credentials";
 import { createAIGateway } from "../src/ai-gateway";
 import type { ProviderAdapter } from "../src/providers/types";
@@ -120,7 +120,57 @@ describe("document service", () => {
     });
 
     expect(result).toHaveProperty("answer", "Answer from document");
-    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
-    expect(user?.daily_points_remaining).toBe(47);
+    if ("operationId" in result) {
+      const opBefore = await env.DB.prepare("SELECT status,telegram_delivery_status FROM operations WHERE id=?1").bind(result.operationId).first<{status:string;telegram_delivery_status:string}>();
+      const reservationBefore = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(result.operationId).first<{status:string}>();
+      expect(opBefore?.status).toBe("delivering");
+      expect(opBefore?.telegram_delivery_status).toBe("pending");
+      expect(reservationBefore?.status).toBe("reserved");
+
+      const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
+      expect(user?.daily_points_remaining).toBe(47);
+
+      expect(await completeDocumentQuestionDelivery(env.DB, userId, result.operationId, "2026-09-28T12:06:00Z")).toBe(true);
+      expect(await completeDocumentQuestionDelivery(env.DB, userId, result.operationId, "2026-09-28T12:07:00Z")).toBe(true);
+
+      const opAfter = await env.DB.prepare("SELECT status,telegram_delivery_status FROM operations WHERE id=?1").bind(result.operationId).first<{status:string;telegram_delivery_status:string}>();
+      const reservationAfter = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(result.operationId).first<{status:string}>();
+      expect(opAfter?.status).toBe("succeeded");
+      expect(opAfter?.telegram_delivery_status).toBe("sent");
+      expect(reservationAfter?.status).toBe("captured");
+    }
   });
+
+  it("releases the document question reservation when Telegram delivery fails", async () => {
+    const { userId, modelId } = await seedUser();
+    const sessionId = crypto.randomUUID();
+    const expires = "2026-09-28T14:00:00Z";
+    await env.DB.prepare("INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,'txt',80,?3,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')")
+      .bind(sessionId, userId, expires).run();
+    await env.DB.prepare("UPDATE users SET active_document_session_id=?2, active_mode='documents' WHERE id=?1").bind(userId, sessionId).run();
+    await env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,?3,?4)")
+      .bind(crypto.randomUUID(), sessionId, "document delivery failure context", expires).run();
+
+    const result = await answerDocumentQuestion({
+      db: env.DB,
+      gateway: gateway(),
+      userId,
+      question: "What uses the document?",
+      now: "2026-09-28T12:05:00Z",
+      modelId,
+      encryptionKey: key,
+    });
+
+    if (!("operationId" in result)) throw new Error("missing operation");
+    expect(await releaseDocumentQuestionDelivery(env.DB, result.operationId, "2026-09-28T12:06:00Z", "telegram_429")).toBe(true);
+
+    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
+    const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(result.operationId).first<{status:string}>();
+    const operation = await env.DB.prepare("SELECT status,error_code FROM operations WHERE id=?1").bind(result.operationId).first<{status:string;error_code:string|null}>();
+    expect(user?.daily_points_remaining).toBe(50);
+    expect(reservation?.status).toBe("released");
+    expect(operation?.status).toBe("failed");
+    expect(operation?.error_code).toBe("telegram_429");
+  });
+
 });
