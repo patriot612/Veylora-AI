@@ -34,8 +34,8 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
   });
   const operationId = operationResult.operation.id;
   if (operationResult.duplicate) {
-    const existing = await input.db.prepare("SELECT status, error_code FROM operations WHERE id = ?1 AND user_id = ?2").bind(operationId, input.userId).first<{ status: string; error_code: string | null }>();
-    if (existing?.status === "succeeded") return { kind: "answered", operationId, text: "Повторная обработка уже завершена.", sources: [] };
+    const existing = await input.db.prepare("SELECT status, error_code, temporary_result_ref FROM operations WHERE id = ?1 AND user_id = ?2").bind(operationId, input.userId).first<{ status: string; error_code: string | null; temporary_result_ref: string | null }>();
+    if (existing?.status === "succeeded") return { kind: "answered", operationId, text: existing.temporary_result_ref ?? "Повторная обработка уже завершена.", sources: [] };
     if (existing?.status === "failed" || existing?.status === "timeout") return { kind: "failed", operationId, code: existing.error_code ?? "search_failed" };
     return { kind: "failed", operationId, code: "search_in_progress" };
   }
@@ -62,9 +62,12 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
       return { kind: "no_result", operationId };
     }
 
-    await input.db.prepare("UPDATE operations SET status = 'delivering', telegram_delivery_status = 'sent' WHERE id = ?1 AND user_id = ?2 AND status = 'processing'").bind(operationId, input.userId).run();
     const text = appendSources(editor.text.trim(), results);
-    await settleReservation(input.db, operationId, new Date().toISOString());
+    const transitioned = await input.db
+      .prepare("UPDATE operations SET status='delivering', telegram_delivery_status='pending', temporary_result_ref=?3 WHERE id=?1 AND user_id=?2 AND status='processing'")
+      .bind(operationId, input.userId, text)
+      .run();
+    if ((transitioned.meta.changes ?? 0) !== 1) throw new Error("search_delivery_state_conflict");
     return { kind: "answered", operationId, text, sources: results };
   } catch (error) {
     const code = error instanceof Error && error.name === "AbortError" ? "search_timeout" : error instanceof Error ? error.message : "search_failed";
@@ -78,6 +81,30 @@ async function selectSearchModel(db: D1Database, userId: string, now: string) {
   const configured = await getSystemConfig(db, "search_editor_model_id");
   const models = await listSelectableModels(db, { userId, type: "search", now });
   return (configured && models.find((model) => model.id === configured)) || models[0] || null;
+}
+
+
+
+export async function completeSearchDelivery(db: D1Database, userId: string, operationId: string, now: string): Promise<boolean> {
+  const marked = await db
+    .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2 AND status='delivering' AND telegram_delivery_status='pending'")
+    .bind(operationId, userId)
+    .run();
+
+  if ((marked.meta.changes ?? 0) === 0) {
+    const current = await db
+      .prepare("SELECT status, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
+      .bind(operationId, userId)
+      .first<{ status: string; telegram_delivery_status: string }>();
+    if (!current || (current.status !== "succeeded" && current.telegram_delivery_status !== "sent")) return false;
+    if (current.status === "succeeded") return true;
+  }
+
+  return settleReservation(db, operationId, now);
+}
+
+export async function releaseSearchDelivery(db: D1Database, operationId: string, now: string, errorCode = "telegram_delivery_failed"): Promise<boolean> {
+  return releaseReservation(db, operationId, now, "failed", errorCode);
 }
 
 export async function searchSearxng(baseUrl: string, query: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<SearchResult[]> {
