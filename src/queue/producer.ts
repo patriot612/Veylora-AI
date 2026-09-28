@@ -1,5 +1,5 @@
 import type { HeavyJobType, QueueJobMessage } from "./types";
-import { reservePoints } from "../billing/points";
+import { releaseReservation, reservePoints } from "../billing/points";
 import { transitionOperation } from "../operations/service";
 
 export type EnqueueHeavyJobInput = {
@@ -61,7 +61,7 @@ export async function enqueueHeavyJob(input: EnqueueHeavyJobInput): Promise<void
       .bind(input.operationId)
       .run()
       .catch(() => undefined);
-    await import("../billing/points").then(({ releaseReservation }) => releaseReservation(input.db, input.operationId, input.now));
+    await releaseReservation(input.db, input.operationId, input.now);
     throw error;
   }
 }
