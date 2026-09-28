@@ -96,7 +96,7 @@ export async function processQueueMessage(
       .run();
     message.ack();
     return "acked";
-  } catch (error) {
+  } catch {
     message.retry();
     return "retried";
   }
