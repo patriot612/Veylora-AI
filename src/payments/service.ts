@@ -176,20 +176,35 @@ export async function settleSuccessfulPayment(input: {
   const days = Math.max(1, plan.duration_days);
   const endsAt = new Date(Date.parse(startsAt) + days * 86_400_000).toISOString();
 
-  await input.db.batch([
-    input.db
-      .prepare("UPDATE orders SET status='paid',telegram_payment_charge_id=?2,paid_at=?3 WHERE id=?1 AND status='pending'")
-      .bind(orderId, input.telegramPaymentChargeId, input.now),
-    input.db
-      .prepare("INSERT INTO payments (id,order_id,provider,external_payment_id,status,raw_safe_metadata,created_at) VALUES (?1,?2,'telegram_stars',?3,'paid',?4,?5)")
-      .bind(paymentId, orderId, input.telegramPaymentChargeId, JSON.stringify({ currency: input.currency, amount: input.totalAmount }), input.now),
-    input.db
-      .prepare("UPDATE subscriptions SET status='expired',updated_at=?2 WHERE user_id=?1 AND status='active'")
-      .bind(order.user_id, input.now),
-    input.db
-      .prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,ends_at,created_at,updated_at) VALUES (?1,?2,?3,'active',?4,?5,?4,?4)")
-      .bind(subscriptionId, order.user_id, order.plan_id, startsAt, endsAt),
-  ]);
-
-  return { orderId, subscriptionId, duplicate: false };
+  try {
+    const result = await input.db.batch([
+      input.db
+        .prepare("UPDATE orders SET status='paid',telegram_payment_charge_id=?2,paid_at=?3 WHERE id=?1 AND status='pending'")
+        .bind(orderId, input.telegramPaymentChargeId, input.now),
+      input.db
+        .prepare("INSERT INTO payments (id,order_id,provider,external_payment_id,status,raw_safe_metadata,created_at) VALUES (?1,?2,'telegram_stars',?3,'paid',?4,?5)")
+        .bind(paymentId, orderId, input.telegramPaymentChargeId, JSON.stringify({ currency: input.currency, amount: input.totalAmount }), input.now),
+      input.db
+        .prepare("UPDATE subscriptions SET status='expired',updated_at=?2 WHERE user_id=?1 AND status='active'")
+        .bind(order.user_id, input.now),
+      input.db
+        .prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,ends_at,created_at,updated_at) VALUES (?1,?2,?3,'active',?4,?5,?4,?4)")
+        .bind(subscriptionId, order.user_id, order.plan_id, startsAt, endsAt),
+    ]);
+    if ((result[0].meta.changes ?? 0) !== 1) throw new Error("payment_order_already_settled");
+    return { orderId, subscriptionId, duplicate: false };
+  } catch (error) {
+    const settled = await input.db
+      .prepare("SELECT status FROM orders WHERE id=?1 AND user_id=?2")
+      .bind(orderId, order.user_id)
+      .first<{ status: string }>();
+    if (settled?.status === "paid") {
+      const existing = await input.db
+        .prepare("SELECT id FROM subscriptions WHERE user_id=?1 AND plan_id=?2 AND status='active' ORDER BY created_at DESC LIMIT 1")
+        .bind(order.user_id, order.plan_id)
+        .first<{ id: string }>();
+      if (existing) return { orderId, subscriptionId: existing.id, duplicate: true };
+    }
+    throw error;
+  }
 }
