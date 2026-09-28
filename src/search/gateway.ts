@@ -26,7 +26,6 @@ export async function getSearchProviderConfig(
     getSystemConfig(db, "search.categories"),
     getSystemConfig(db, "search.time_range"),
     getSystemConfig(db, "search.safe_search"),
-    getSystemConfig(db, "search.auth_token"),
   ]);
 
   const primaryUrl = primary?.trim() || envPrimaryUrl?.trim() || "";
@@ -40,7 +39,7 @@ export async function getSearchProviderConfig(
     categories: categories?.trim() || "general",
     timeRange: timeRange?.trim() || "",
     safeSearch: Math.max(0, Math.min(2, Number(safeSearch) || 0)),
-    ...(token?.trim() || envAuthToken?.trim() ? { authToken: token?.trim() || envAuthToken?.trim() } : {}),
+    ...(envAuthToken?.trim() ? { authToken: envAuthToken.trim() } : {}),
   };
 }
 
