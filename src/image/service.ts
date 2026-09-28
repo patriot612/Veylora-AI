@@ -104,7 +104,7 @@ export async function processImageJob(message: {
   operationId: string;
   userId: string;
   metadata?: Record<string, unknown>;
-}, deps: ImageQueueDeps): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string }> {
+}, deps: ImageQueueDeps): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string; retryAfterSeconds?: number }> {
   const operation = await deps.db
     .prepare("SELECT status, model_id, temporary_result_ref, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
     .bind(message.operationId, message.userId)
@@ -180,7 +180,12 @@ export async function processImageJob(message: {
     return { ok: true };
   } catch (error) {
     if (error instanceof TelegramApiError && error.retryable) {
-      return { ok: false, retryable: true, code: "telegram_delivery_retry" };
+      return {
+        ok: false,
+        retryable: true,
+        code: "telegram_delivery_retry",
+        ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+      };
     }
     return { ok: false, retryable: false, code: "telegram_delivery_failed" };
   }
