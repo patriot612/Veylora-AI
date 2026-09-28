@@ -3,6 +3,8 @@ export type CleanupResult = {
   documentSessions: number;
   documentChunks: number;
   subscriptions: number;
+  expiredConversations: number;
+  deletedConversationTurns: number;
   settledDeliveries: number;
   rateLimitBuckets: number;
 };
