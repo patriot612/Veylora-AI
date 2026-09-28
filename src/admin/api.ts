@@ -23,6 +23,8 @@ export async function handleAdminApi(
     { prefix: "templates", permission: "templates.write", handler: () => templates(env) },
     { prefix: "plans", permission: "plans.write", handler: () => plans(env) },
     { prefix: "payments", permission: "payments.read", handler: () => payments(env) },
+    { prefix: "search", permission: "search.read", handler: () => search(env) },
+    { prefix: "statistics", permission: "statistics.read", handler: () => statistics(env) },
     { prefix: "queue", permission: "queue.read", handler: () => queue(env) },
     { prefix: "audit", permission: "audit.read", handler: () => audit(env) },
     { prefix: "config", permission: "system.write", handler: () => config(env, request, session) },
@@ -73,6 +75,36 @@ async function payments(env: Env) {
   const rows = await env.DB.prepare("SELECT o.id,o.user_id,o.plan_id,o.status,o.amount,o.currency,o.provider,o.telegram_payment_charge_id,o.created_at,o.paid_at,o.refunded_at FROM orders o ORDER BY o.created_at DESC LIMIT 200").all();
   return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
 }
+async function search(env: Env) {
+  const rows = await env.DB.prepare(
+    "SELECT o.id,o.user_id,u.telegram_user_id,o.model_id,m.display_name AS model_name,o.status,o.telegram_delivery_status,o.points_cost,o.error_code,o.created_at,o.finished_at FROM operations o JOIN users u ON u.id=o.user_id LEFT JOIN models m ON m.id=o.model_id WHERE o.type='search' ORDER BY o.created_at DESC LIMIT 200",
+  ).all();
+  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+}
+
+async function statistics(env: Env) {
+  const [daily, weekly, points] = await Promise.all([
+    env.DB.prepare(
+      "SELECT type,status,COUNT(*) AS count FROM operations WHERE created_at >= datetime('now','-1 day') GROUP BY type,status ORDER BY type,status",
+    ).all(),
+    env.DB.prepare(
+      "SELECT type,status,COUNT(*) AS count FROM operations WHERE created_at >= datetime('now','-7 day') GROUP BY type,status ORDER BY type,status",
+    ).all(),
+    env.DB.prepare(
+      "SELECT COALESCE(SUM(CASE WHEN entry_type='capture' THEN amount ELSE 0 END),0) AS captured_points, COALESCE(SUM(CASE WHEN entry_type='release' THEN amount ELSE 0 END),0) AS released_points FROM point_ledger WHERE created_at >= datetime('now','-7 day')",
+    ).first<{ captured_points: number; released_points: number }>(),
+  ]);
+  return Response.json({
+    ok: true,
+    daily: daily.results ?? [],
+    weekly: weekly.results ?? [],
+    points: {
+      captured: points?.captured_points ?? 0,
+      released: points?.released_points ?? 0,
+    },
+  }, { headers: noStore() });
+}
+
 async function queue(env: Env) {
   const rows = await env.DB.prepare("SELECT queue_type,status,COUNT(*) AS count FROM queue_jobs GROUP BY queue_type,status ORDER BY queue_type,status").all();
   return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
