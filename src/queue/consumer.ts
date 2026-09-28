@@ -169,8 +169,9 @@ async function touchQueueJob(db: D1Database, operationId: string, now: string): 
 }
 
 function retryMessage(message: Message<unknown>, retryAfterSeconds?: number): void {
-  if (Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds > 0) {
-    message.retry({ delaySeconds: Math.min(86400, retryAfterSeconds) });
+  const delay = retryAfterSeconds;
+  if (typeof delay === "number" && Number.isSafeInteger(delay) && delay > 0) {
+    message.retry({ delaySeconds: Math.min(86400, delay) });
   } else {
     message.retry();
   }
