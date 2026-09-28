@@ -27,6 +27,7 @@ export type ProviderGatewayErrorCode =
   | "provider_unavailable"
   | "provider_rejected"
   | "provider_invalid_response"
+  | "provider_rate_limited"
   | "provider_unsupported";
 
 export class ProviderGatewayError extends Error {
@@ -34,11 +35,14 @@ export class ProviderGatewayError extends Error {
     public readonly code: ProviderGatewayErrorCode,
     message: string,
     public readonly retryable: boolean,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; retryAfterMs?: number },
   ) {
     super(message, options);
     this.name = "ProviderGatewayError";
+    this.retryAfterMs = options?.retryAfterMs;
   }
+
+  readonly retryAfterMs?: number;
 }
 
 export interface ProviderAdapter {
