@@ -29,7 +29,11 @@ export async function enqueueHeavyJob(input: EnqueueHeavyJobInput): Promise<void
     input.pointsCost,
     input.now,
   );
-  if (!reservation.ok) throw new Error(reservation.reason);
+  if (!reservation.ok) {
+    await input.db.prepare("UPDATE operations SET status='failed', error_code=?3, finished_at=?4 WHERE id=?1 AND user_id=?2 AND status='created'")
+      .bind(input.operationId, input.userId, reservation.reason, input.now).run();
+    throw new Error(reservation.reason);
+  }
 
   const message: QueueJobMessage = {
     version: 1,
