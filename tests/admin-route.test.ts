@@ -143,10 +143,14 @@ describe("Admin Mini App HTTP surface", () => {
     });
     expect(planUpdate.status).toBe(200);
 
-    const fakeFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: true }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }));
+    let refundUrl = "";
+    const fakeFetch = vi.fn(async (input: RequestInfo | URL) => {
+      refundUrl = String(input);
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
     vi.stubGlobal("fetch", fakeFetch);
     try {
       const refund = await worker.default.fetch(`https://example.test/admin/api/payments/${orderId}/refund`, {
@@ -154,7 +158,7 @@ describe("Admin Mini App HTTP surface", () => {
         headers,
       });
       expect(refund.status).toBe(200);
-      expect(String(fakeFetch.mock.calls[0]?.[0])).toContain("/refundStarPayment");
+      expect(refundUrl).toContain("/refundStarPayment");
     } finally {
       vi.unstubAllGlobals();
     }
