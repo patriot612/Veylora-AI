@@ -44,7 +44,6 @@ export async function extractDocument(
   const pageCount = pdf.numPages;
   await pdf.loadingTask.destroy();
   return { fileType, pages: pageCount, text: normalizeText(text).slice(0, maxChars) };
-  return { fileType, pages: pageCount, text: normalizeText(parts.join("\n")).slice(0, maxChars) };
 }
 
 export function chunkDocumentText(text: string, size = 2000, overlap = 200): string[] {
