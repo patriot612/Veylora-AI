@@ -1,1 +1,41 @@
-import { env } from "./test-env";\nimport { describe, expect, it } from "vitest";\nimport { strToU8, zipSync } from "fflate";\nimport { chunkDocumentText, extractDocument, rankChunks } from "../src/documents/extract";\n\ndescribe("document extraction", () => {\n  it("extracts TXT with normalization and limit", async () => {\n    const result = await extractDocument(\n      new TextEncoder().encode("  hello   world\\n\\n\\nsecond line  ").buffer,\n      "txt",\n      env.DB,\n    );\n    expect(result.text).toBe("hello world\\n\\nsecond line");\n    expect(result.fileType).toBe("txt");\n  });\n\n  it("extracts DOCX text from word/document.xml without storing binary payload", async () => {\n    const xml = '<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p><w:p><w:r><w:t>World &amp; Docs</w:t></w:r></w:p></w:body></w:document>';\n    const bytes = zipSync({ "word/document.xml": strToU8(xml) });\n    const result = await extractDocument(bytes.buffer, "docx", env.DB);\n    expect(result.text).toContain("Hello");\n    expect(result.text).toContain("World & Docs");\n  });\n\n  it("chunks with bounded overlap and ranks the best excerpts", () => {\n    const chunks = chunkDocumentText("alpha beta gamma ".repeat(200), 100, 20);\n    expect(chunks.length).toBeGreaterThan(1);\n    expect(chunks.every((chunk) => chunk.length <= 100)).toBe(true);\n\n    const ranked = rankChunks(\n      [\n        { id: "a", content: "banana apple fruit" },\n        { id: "b", content: "cloudflare queue telegram" },\n        { id: "c", content: "telegram cloudflare security" },\n      ],\n      "cloudflare telegram",\n      2,\n    );\n    expect(ranked.map((row) => row.id)).toEqual(["b", "c"]);\n  });\n});
+import { env } from "./test-env";
+import { describe, expect, it } from "vitest";
+import { strToU8, zipSync } from "fflate";
+import { chunkDocumentText, extractDocument, rankChunks } from "../src/documents/extract";
+
+describe("document extraction", () => {
+  it("extracts TXT with normalization and limit", async () => {
+    const result = await extractDocument(
+      new TextEncoder().encode("  hello   world\n\n\nsecond line  ").buffer,
+      "txt",
+      env.DB,
+    );
+    expect(result.text).toBe("hello world\n\nsecond line");
+    expect(result.fileType).toBe("txt");
+  });
+
+  it("extracts DOCX text from word/document.xml without storing binary payload", async () => {
+    const xml = '<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p><w:p><w:r><w:t>World &amp; Docs</w:t></w:r></w:p></w:body></w:document>';
+    const bytes = zipSync({ "word/document.xml": strToU8(xml) });
+    const result = await extractDocument(bytes.buffer, "docx", env.DB);
+    expect(result.text).toContain("Hello");
+    expect(result.text).toContain("World & Docs");
+  });
+
+  it("chunks with bounded overlap and ranks the best excerpts", () => {
+    const chunks = chunkDocumentText("alpha beta gamma ".repeat(200), 100, 20);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 100)).toBe(true);
+
+    const ranked = rankChunks(
+      [
+        { id: "a", content: "banana apple fruit" },
+        { id: "b", content: "cloudflare queue telegram" },
+        { id: "c", content: "telegram cloudflare security" },
+      ],
+      "cloudflare telegram",
+      2,
+    );
+    expect(ranked.map((row) => row.id)).toEqual(["b", "c"]);
+  });
+});
