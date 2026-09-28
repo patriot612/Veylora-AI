@@ -87,7 +87,8 @@ describe("Admin Mini App HTTP surface", () => {
       body: JSON.stringify({ key: "forbidden.test", value: "x" }),
     });
     expect(configWrite.status).toBe(403);
-  
+  });
+
   it("supports owner control writes with audit attribution and Telegram Stars refund", async () => {
     const ownerTelegramId = 940000003;
     const ownerUserId = crypto.randomUUID();
