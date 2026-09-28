@@ -91,6 +91,40 @@ export async function handleTelegramCallback(
   const locale = await getUserLocale(env.DB, userId);
   if (callbackId) await answerTelegramCallbackQuery(botToken, callbackId).catch(() => false);
 
+  if (data === "chat_retry") {
+    const prefs = await getUiPreferences(env.DB, userId);
+    const text = typeof prefs.lastChatText === "string" ? prefs.lastChatText : "";
+    if (!text) {
+      await sendTelegramMessage(botToken, chatId, t(locale, "chat.failed"), { reply_markup: mainMenuKeyboard(false, locale) });
+      return true;
+    }
+    const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY ?? "", createDefaultProviderAdapters());
+    await handleChatMessage({
+      db: env.DB,
+      gateway,
+      userId,
+      text,
+      chatId,
+      messageId: callbackMessageId ?? 0,
+      now,
+      credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY ?? "",
+      send: (message, options) => sendTelegramMessage(botToken, chatId, message, options),
+      edit: (messageId, message, options) => editTelegramMessage(botToken, chatId, messageId, message, options),
+    });
+    return true;
+  }
+
+  if (data === "search_retry") {
+    const prefs = await getUiPreferences(env.DB, userId);
+    const query = typeof prefs.lastSearchQuery === "string" ? prefs.lastSearchQuery : "";
+    if (!query) {
+      await sendTelegramMessage(botToken, chatId, t(locale, "search.failed"));
+      return true;
+    }
+    await handleSearchText(env, userId, chatId, query, now);
+    return true;
+  }
+
   if (data.startsWith("plan_buy:")) {
     const planId = data.slice("plan_buy:".length);
     const invoice = await createPlanInvoice({ db: env.DB, botToken, userId, chatId, planId, now });
@@ -620,12 +654,17 @@ export async function handleSearchText(
   env: Env,
   userId: string,
   chatId: number,
-  telegramUpdateId: number,
-  text: string,
-  now: string,
+  telegramUpdateIdOrText: number | string,
+  textOrNow: string,
+  maybeNow?: string,
 ): Promise<boolean> {
+  const telegramUpdateId = typeof telegramUpdateIdOrText === "number" ? telegramUpdateIdOrText : undefined;
+  const text = typeof telegramUpdateIdOrText === "number" ? textOrNow : telegramUpdateIdOrText;
+  const now = typeof telegramUpdateIdOrText === "number" ? maybeNow as string : textOrNow;
   if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
   const prefs = await getUiPreferences(env.DB, userId);
+  prefs.lastSearchQuery = text.slice(0, 1000);
+  await setUiPreferences(env.DB, userId, prefs);
   const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
   const status = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(await getUserLocale(env.DB, userId), "search.processing")).catch(() => null);
   const outcome = await executeSearch({
@@ -655,7 +694,7 @@ async function deliverSearchOutcome(env: Env, userId: string, chatId: number, ou
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
       }
       telegramDelivered = true;
-      if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");
+      if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");\n      const prefs = await getUiPreferences(env.DB, userId); delete prefs.lastSearchQuery; await setUiPreferences(env.DB, userId, prefs);
     } catch (error) {
       if (!telegramDelivered) {
         await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
@@ -669,8 +708,9 @@ async function deliverSearchOutcome(env: Env, userId: string, chatId: number, ou
     return;
   }
   const message = outcome.kind === "no_result" ? t(locale, "search.noResult") : outcome.kind === "insufficient_points" ? t(locale, "billing.insufficient") : t(locale, "search.failed");
-  if (statusMessageId) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, message).catch(() => false);
-  else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
+  const retryMarkup = { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.retry"), callback_data: "search_retry" }]] } };
+  if (statusMessageId) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, message, retryMarkup).catch(() => false);
+  else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message, retryMarkup);
 }
 
 async function isAdminTelegramUser(env: Env, telegramUserId: number): Promise<boolean> {
