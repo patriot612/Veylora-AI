@@ -5,7 +5,7 @@ import { handleChatMessage } from "./chat/service";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery } from "./search/service";
 import { claimTelegramUpdate, markTelegramUpdate, upsertTelegramUser } from "./db/telegram";
 import { hasValidWebhookSecret, isTelegramWebhookPath, jsonResponse } from "./http";
-import { editTelegramMessage, sendTelegramMessage } from "./telegram/api";
+import { deleteTelegramMessage, editTelegramMessage, sendTelegramMessage } from "./telegram/api";
 import { handleDialogRenameText, handleImageText, handleSearchText, handleStartCommand, handleTelegramCallback } from "./telegram/flows";
 import { classifyTelegramUpdate } from "./telegram/router";
 import { processQueueBatch } from "./queue/consumer";
@@ -155,6 +155,18 @@ export default {
             await handleVoiceTextWhileActive(env.TELEGRAM_BOT_TOKEN, envelope.chat_id);
           } else {
             if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("telegram_chat_runtime_secrets_missing");
+            const prefsRow = await env.DB.prepare("SELECT ui_preferences FROM user_settings WHERE user_id=?1").bind(user.id).first<{ ui_preferences: string }>();
+            try {
+              const prefs = JSON.parse(prefsRow?.ui_preferences ?? "{}") as Record<string, unknown>;
+              const menuMessageId = typeof prefs.mainMenuMessageId === "number" ? prefs.mainMenuMessageId : null;
+              if (menuMessageId) {
+                await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, menuMessageId).catch(() => false);
+                delete prefs.mainMenuMessageId;
+                await env.DB.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(user.id, JSON.stringify(prefs)).run();
+              }
+            } catch {
+              // Ignore malformed/stale UI preferences.
+            }
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
             const send = (text: string, options?: Parameters<typeof sendTelegramMessage>[3]) => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, text, options);
             const edit = (messageId: number, text: string, options?: Parameters<typeof editTelegramMessage>[4]) => editTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, messageId, text, options);
