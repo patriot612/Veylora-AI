@@ -61,6 +61,7 @@ export async function enqueueHeavyJob(input: EnqueueHeavyJobInput): Promise<void
       .bind(input.operationId)
       .run()
       .catch(() => undefined);
+    await import("../billing/points").then(({ releaseReservation }) => releaseReservation(input.db, input.operationId, input.now));
     throw error;
   }
 }
