@@ -27,10 +27,6 @@ export type ChatResult =
   | { kind: "answered"; operationId: string; conversationId: string; temporaryMessageId: number; answer: string }
   | { kind: "busy" | "insufficient_points" | "subscription_required" | "invalid_input" | "failed"; operationId?: string; temporaryMessageId?: number; retryable: boolean };
 
-const INSUFFICIENT_POINTS_MESSAGE = "У вас закончились баллы.\nПриобретите подписку\n\n[Тарифы]";
-const BUSY_MESSAGE = "✋ Предыдущий запрос ещё обрабатывается. Дождитесь ответа или повторите позже.";
-const FAILURE_MESSAGE = "Не удалось получить ответ. Попробуйте ещё раз.";
-
 export async function handleChatMessage(input: ChatRequest): Promise<ChatResult> {
   const text = input.text.trim();
   const locale = await getUserLocale(input.db, input.userId);
@@ -113,7 +109,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
       now: new Date().toISOString(),
       errorCode: "busy",
     });
-    await safeSend(input.send, BUSY_MESSAGE);
+    await safeSend(input.send, t(locale, "chat.busy"));
     return { kind: "busy", operationId: operation.operation.id, retryable: true };
   }
 
@@ -199,9 +195,9 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
       }).catch(() => false);
 
       if (temporaryMessageId) {
-        await safeEdit(input.edit, temporaryMessageId, t(locale, "chat.failed") + "\n[🔄 Retry]");
+        await safeEdit(input.edit, temporaryMessageId, t(locale, "chat.failed") + "\n" + t(locale, "common.retry"));
       } else {
-        await safeSend(input.send, t(locale, "chat.failed") + "\n[🔄 Retry]");
+        await safeSend(input.send, t(locale, "chat.failed") + "\n" + t(locale, "common.retry"));
       }
     }
 
