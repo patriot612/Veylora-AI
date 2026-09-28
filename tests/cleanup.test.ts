@@ -38,4 +38,23 @@ describe("scheduled cleanup", () => {
     expect(activeChunk?.content).toBe("active");
     expect(expiredSessionRow).toBeNull();
   });
+
+  it("settles a delivered operation left pending by a worker crash", async () => {
+    const userId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id,telegram_user_id,daily_billing_day,daily_points_remaining,created_at,updated_at) VALUES (?1,?2,'2026-09-28',40,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(userId, 980000003),
+      env.DB.prepare("INSERT INTO operations (id,user_id,type,status,points_cost,telegram_delivery_status,created_at) VALUES (?1,?2,'search','delivering',10,'sent','2026-09-28T12:00:00Z')").bind(operationId, userId),
+      env.DB.prepare("INSERT INTO point_reservations (id,operation_id,daily_amount,bonus_amount,status,created_at) VALUES (?1,?2,10,0,'reserved','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId),
+    ]);
+    const result = await worker.scheduled({ cron: "0 * * * *", scheduledTime: Date.parse("2026-09-28T01:00:00Z"), type: "scheduled", noRetry: () => undefined } as ScheduledController, env);
+    expect(result).toBeUndefined();
+    const operation = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
+    const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(operationId).first<{status:string}>();
+    const ledger = await env.DB.prepare("SELECT source,entry_type,amount FROM point_ledger WHERE operation_id=?1 AND entry_type='capture'").bind(operationId).all<{source:string;entry_type:string;amount:number}>();
+    expect(operation?.status).toBe("succeeded");
+    expect(reservation?.status).toBe("captured");
+    expect(ledger.results).toHaveLength(1);
+  });
+
 });
