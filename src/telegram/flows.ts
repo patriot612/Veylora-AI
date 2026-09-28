@@ -8,6 +8,7 @@ import { enterVoiceMode } from "../voice/service";
 import { answerTelegramCallbackQuery, editTelegramMessage, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
 import { getUserLocale, t } from "../i18n";
+import { getSystemConfigInt } from "../config";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
 import { createAIGateway } from "../ai-gateway";
 import { createDefaultProviderAdapters } from "../providers/factory";
