@@ -57,6 +57,14 @@ describe("SearXNG normalization", () => {
     expect(requested?.searchParams.get("format")).toBe("json");
     expect(results.map((r) => r.url)).toEqual(["https://example.com/a", "https://example.com/b"]);
   });
+
+  it("aborts an SearXNG request when its timeout elapses", async () => {
+    await expect(searchSearxng("https://search.example", "slow", async (_input, init) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      if (init?.signal?.aborted) throw new DOMException("timeout", "AbortError");
+      return fetchResults();
+    }, 1)).rejects.toMatchObject({ name: "AbortError" });
+  });
 });
 
 describe("Search Mode", () => {
@@ -102,10 +110,36 @@ describe("Search Mode", () => {
     }
   });
 
+  it("releases points and marks timeout on an editor timeout", async () => {
+    const { userId, modelId } = await seedSearchUser(50, 8);
+    const result = await executeSearch({ db: env.DB, gateway: gateway(modelId, "failure"), userId, query: "timeout", telegramUpdateId: 20004, now: "2026-09-28T12:00:00Z", searxngUrl: "https://search.example", credentialEncryptionKey: key, fetchImpl: async () => { throw new DOMException("timeout", "AbortError"); } });
+    expect(result.kind).toBe("failed");
+    if (result.kind === "failed") {
+      const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{ daily_points_remaining:number }>();
+      const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(result.operationId).first<{ status:string }>();
+      const op = await env.DB.prepare("SELECT status, error_code FROM operations WHERE id=?1").bind(result.operationId).first<{ status:string; error_code:string|null }>();
+      expect(user?.daily_points_remaining).toBe(50);
+      expect(reservation?.status).toBe("released");
+      expect(op?.status).toBe("timeout");
+      expect(op?.error_code).toBe("search_timeout");
+    }
+  });
+
+  it("does not double-charge duplicate Telegram delivery", async () => {
+    const { userId, modelId } = await seedSearchUser(50, 9);
+    const input = { db: env.DB, gateway: gateway(modelId, "success"), userId, query: "duplicate", telegramUpdateId: 20005, now: "2026-09-28T12:00:00Z", searxngUrl: "https://search.example", credentialEncryptionKey: key, fetchImpl: async () => fetchResults() };
+    const first = await executeSearch(input);
+    const second = await executeSearch(input);
+    expect(first.kind).toBe("answered");
+    expect(second.kind).toBe("answered");
+    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{ daily_points_remaining:number }>();
+    expect(user?.daily_points_remaining).toBe(41);
+  });
+
   it("does not call SearXNG when points are insufficient", async () => {
     const { userId, modelId } = await seedSearchUser(3, 7);
     let calls = 0;
-    const result = await executeSearch({ db: env.DB, gateway: gateway(modelId, "success"), userId, query: "too expensive", telegramUpdateId: 20004, now: "2026-09-28T12:00:00Z", searxngUrl: "https://search.example", credentialEncryptionKey: key, fetchImpl: async () => { calls += 1; return fetchResults(); } });
+    const result = await executeSearch({ db: env.DB, gateway: gateway(modelId, "success"), userId, query: "too expensive", telegramUpdateId: 20006, now: "2026-09-28T12:00:00Z", searxngUrl: "https://search.example", credentialEncryptionKey: key, fetchImpl: async () => { calls += 1; return fetchResults(); } });
     expect(result.kind).toBe("insufficient_points");
     expect(calls).toBe(0);
   });
