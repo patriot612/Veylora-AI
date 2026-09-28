@@ -158,7 +158,7 @@ describe("Chat service", () => {
   });
 
   it("rejects a second request while the user has an active operation", async () => {
-    const { userId, modelId } = await seedUser(4, 50);
+    const { userId } = await seedUser(4, 50);
     await env.DB.prepare("UPDATE users SET active_operation_id='already-busy' WHERE id=?1").bind(userId).run();
     const h = harness();
     let calls = 0;
