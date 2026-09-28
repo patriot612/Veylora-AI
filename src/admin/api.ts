@@ -30,7 +30,7 @@ export async function handleAdminApi(
     { prefix: "payments", permission: "payments.read", handler: () => payments(env, request, session, parts.slice(1)) },
     { prefix: "search", permission: "search.read", handler: () => search(env, request, session) },
     { prefix: "statistics", permission: "statistics.read", handler: () => statistics(env) },
-    { prefix: "queue", permission: "queue.read", handler: () => queue(env) },
+    { prefix: "queue", permission: "queue.read", handler: () => queue(env, request, session) },
     { prefix: "audit", permission: "audit.read", handler: () => audit(env) },
     { prefix: "config", permission: "system.write", handler: () => config(env, request, session) },
   ];
@@ -483,10 +483,39 @@ async function statistics(env: Env) {
   }, { headers: noStore() });
 }
 
-async function queue(env: Env) {
-  const rows = await env.DB.prepare("SELECT queue_type,status,COUNT(*) AS count FROM queue_jobs GROUP BY queue_type,status ORDER BY queue_type,status").all();
-  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+async function queue(env: Env, request: Request, session: AdminSession) {
+  if (request.method !== "GET") {
+    assertPermission(session, "system.write");
+    const body = await request.json<{ maintenanceMode?: unknown }>();
+    if (typeof body.maintenanceMode !== "boolean") {
+      return Response.json({ error: "invalid_maintenance_mode" }, { status: 400, headers: noStore() });
+    }
+    const actor = await adminActorId(env.DB, session);
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT INTO system_config(config_key,config_value,updated_by_user_id,updated_at) VALUES ('system.maintenance_mode',?1,?2,?3) ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at",
+    ).bind(body.maintenanceMode ? "1" : "0", actor, now).run();
+    await writeAudit(env.DB, actor, "maintenance.toggle", "system_config", "system.maintenance_mode", session.role);
+  }
+
+  const [rows, retrying, failed, deadLettered, config] = await Promise.all([
+    env.DB.prepare("SELECT queue_type,status,COUNT(*) AS count FROM queue_jobs GROUP BY queue_type,status ORDER BY queue_type,status").all(),
+    env.DB.prepare("SELECT COALESCE(SUM(attempt),0) AS retries FROM queue_jobs WHERE attempt > 0").first<{retries:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM queue_jobs WHERE status='failed'").first<{count:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM queue_jobs WHERE status='dead_lettered'").first<{count:number}>(),
+    env.DB.prepare("SELECT config_value FROM system_config WHERE config_key='system.maintenance_mode'").first<{config_value:string}>(),
+  ]);
+
+  return Response.json({
+    ok: true,
+    rows: rows.results ?? [],
+    retries: retrying?.retries ?? 0,
+    failed: failed?.count ?? 0,
+    deadLettered: deadLettered?.count ?? 0,
+    maintenanceMode: config?.config_value === "1",
+  }, { headers: noStore() });
 }
+
 async function audit(env: Env) {
   const rows = await env.DB.prepare("SELECT id,actor_user_id,event_type,target_type,target_id,safe_metadata,created_at FROM audit_log ORDER BY created_at DESC LIMIT 300").all();
   return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
