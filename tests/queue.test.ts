@@ -60,14 +60,8 @@ describe("heavy queue producer", () => {
     ).bind(operationId, userId, modelId).run();
 
     await enqueueHeavyJob({
-      db: env.DB,
-      queue,
-      operationId,
-      userId,
-      jobType: "image",
-      pointsCost: 10,
-      now: "2026-09-28T12:00:00Z",
-      metadata: { templateId: "template-1" },
+      db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 10,
+      now: "2026-09-28T12:00:00Z", metadata: { templateId: "template-1" },
     });
 
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
@@ -111,16 +105,15 @@ describe("heavy queue consumer", () => {
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 10, now: "2026-09-28T12:00:00Z" });
 
     const first = fakeMessage(queue.sent[0]);
+    const handler = async () => ({ ok: true } as const);
     const result = await processQueueMessage(first, {
-      db: env.DB,
-      now: () => "2026-09-28T12:01:00Z",
-      handlers: { image: async () => ({ ok: true }), voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
+      db: env.DB, now: () => "2026-09-28T12:01:00Z",
+      handlers: { image: handler, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
     });
     const second = fakeMessage(queue.sent[0]);
     await processQueueMessage(second, {
-      db: env.DB,
-      now: () => "2026-09-28T12:02:00Z",
-      handlers: { image: async () => ({ ok: true }), voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
+      db: env.DB, now: () => "2026-09-28T12:02:00Z",
+      handlers: { image: handler, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
     });
 
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
@@ -130,6 +123,38 @@ describe("heavy queue consumer", () => {
     expect(result).toBe("acked");
     expect(first.acked).toBe(true);
     expect(second.acked).toBe(true);
+    expect(user?.daily_points_remaining).toBe(40);
+    expect(op?.status).toBe("succeeded");
+    expect(job?.status).toBe("succeeded");
+  });
+
+  it("settles after Telegram delivery without invoking the external handler again", async () => {
+    const { userId, modelId } = await seedHeavyUser(50, 10);
+    const operationId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO operations (id,user_id,type,status,model_id,points_cost,telegram_delivery_status,created_at) VALUES (?1,?2,'image','delivering',?3,10,'sent','2026-09-28T12:00:00Z')",
+    ).bind(operationId, userId, modelId).run();
+    const queue = fakeQueue();
+    await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 10, now: "2026-09-28T12:00:00Z" });
+
+    let handlerCalls = 0;
+    const message = fakeMessage(queue.sent[0]);
+    const result = await processQueueMessage(message, {
+      db: env.DB,
+      now: () => "2026-09-28T12:01:00Z",
+      handlers: {
+        image: async () => { handlerCalls += 1; return { ok: true }; },
+        voice: async () => ({ ok: true }),
+        document: async () => ({ ok: true }),
+      },
+    });
+
+    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
+    const op = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
+    const job = await env.DB.prepare("SELECT status FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string}>();
+
+    expect(result).toBe("acked");
+    expect(handlerCalls).toBe(0);
     expect(user?.daily_points_remaining).toBe(40);
     expect(op?.status).toBe("succeeded");
     expect(job?.status).toBe("succeeded");
@@ -146,8 +171,7 @@ describe("heavy queue consumer", () => {
 
     const msg = fakeMessage(queue.sent[0]);
     const result = await processQueueMessage(msg, {
-      db: env.DB,
-      now: () => "2026-09-28T12:01:00Z",
+      db: env.DB, now: () => "2026-09-28T12:01:00Z",
       handlers: { image: async () => ({ ok: false, retryable: true, code: "provider_503" }), voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
     });
 
@@ -170,10 +194,7 @@ describe("heavy queue consumer", () => {
     const queue = fakeQueue();
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 8, now: "2026-09-28T12:00:00Z" });
 
-    const batch = {
-      queue: "veylora-ai-jobs-dlq",
-      messages: [fakeMessage(queue.sent[0])],
-    } as unknown as MessageBatch<unknown>;
+    const batch = { queue: "veylora-ai-jobs-dlq", messages: [fakeMessage(queue.sent[0])] } as unknown as MessageBatch<unknown>;
     await processDeadLetterBatch(batch, env.DB, () => "2026-09-28T12:02:00Z");
 
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
