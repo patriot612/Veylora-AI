@@ -126,7 +126,7 @@ export async function releaseSearchDelivery(db: D1Database, operationId: string,
 }
 
 export async function searchSearxng(baseUrl: string, query: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<SearchResult[]> {
-  const payload = await searchViaGateway({ primaryUrl: baseUrl, enabled: true, maxQueryChars: MAX_QUERY_CHARS }, query, fetchImpl, timeoutMs);
+  const payload = await searchViaGateway({ primaryUrl: baseUrl, enabled: true, maxQueryChars: MAX_QUERY_CHARS, language: "all", categories: "general", timeRange: "", safeSearch: 0 }, query, fetchImpl, timeoutMs);
   return normalizeResults(payload);
 }
 
