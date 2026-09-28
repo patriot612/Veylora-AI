@@ -197,4 +197,3 @@ describe("Admin Mini App HTTP surface", () => {
     expect(response.status).toBe(403);
   });
 });
-});
