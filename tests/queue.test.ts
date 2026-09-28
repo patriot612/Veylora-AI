@@ -71,6 +71,19 @@ describe("heavy queue producer", () => {
   });
 });
 
+  it("marks enqueue operations failed when points cannot be reserved", async () => {
+    const { userId, modelId } = await seedHeavyUser(5, 10);
+    const queue = fakeQueue();
+    const operationId = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,10,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+
+    await expect(enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 10, now: "2026-09-28T12:00:00Z" })).rejects.toThrow("insufficient_points");
+    const operation = await env.DB.prepare("SELECT status,error_code FROM operations WHERE id=?1").bind(operationId).first<{status:string;error_code:string|null}>();
+    expect(operation?.status).toBe("failed");
+    expect(operation?.error_code).toBe("insufficient_points");
+    expect(queue.sent).toHaveLength(0);
+  });
+
 describe("heavy queue consumer", () => {
   it("processes success exactly once and captures reservation", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 10);
@@ -196,6 +209,26 @@ describe("heavy queue consumer", () => {
     expect(result).toBe("retried");
     expect(message.retried).toBe(true);
     expect(user?.daily_points_remaining).toBe(41);
+  });
+
+  it("captures a delivered job instead of releasing points when it reaches DLQ", async () => {
+    const { userId, modelId } = await seedHeavyUser(50, 13);
+    const operationId = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,telegram_delivery_status,created_at) VALUES (?1,?2,'image','delivering',?3,13,'sent','2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+    await env.DB.prepare("INSERT INTO point_reservations (id,operation_id,daily_amount,bonus_amount,status,created_at) VALUES (?1,?2,13,0,'reserved','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId).run();
+    const message = fakeMessage({ version: 1, operationId, userId, jobType: "image", enqueuedAt: "2026-09-28T12:00:00Z" });
+    const batch = { queue: "veylora-ai-jobs-dlq", messages: [message] } as unknown as MessageBatch<unknown>;
+
+    await processDeadLetterBatch(batch, env.DB, () => "2026-09-28T12:02:00Z");
+
+    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
+    const operation = await env.DB.prepare("SELECT status,error_code FROM operations WHERE id=?1").bind(operationId).first<{status:string;error_code:string|null}>();
+    const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(operationId).first<{status:string}>();
+    expect(user?.daily_points_remaining).toBe(37);
+    expect(operation?.status).toBe("succeeded");
+    expect(operation?.error_code).toBeNull();
+    expect(reservation?.status).toBe("captured");
+    expect(message.acked).toBe(true);
   });
 
   it("terminally fails dead-lettered jobs and releases points", async () => {
