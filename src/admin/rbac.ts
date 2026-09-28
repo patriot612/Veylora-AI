@@ -14,7 +14,9 @@ export type AdminPermission =
   | "plans.write"
   | "payments.read"
   | "payments.refund"
+  | "search.read"
   | "search.write"
+  | "statistics.read"
   | "queue.read"
   | "system.write"
   | "audit.read";
@@ -24,14 +26,14 @@ const PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
     "dashboard.read","users.read","users.write","models.read","models.write",
     "providers.read","providers.write","credentials.write","roles.write",
     "templates.write","plans.write","payments.read","payments.refund",
-    "search.write","queue.read","system.write","audit.read",
+    "search.read","search.write","statistics.read","queue.read","system.write","audit.read",
   ]),
   admin: new Set([
     "dashboard.read","users.read","users.write","models.read","models.write",
     "providers.read","providers.write","roles.write","templates.write",
-    "plans.write","payments.read","payments.refund","search.write","queue.read",
+    "plans.write","payments.read","payments.refund","search.read","search.write","statistics.read","queue.read",
   ]),
-  support: new Set(["dashboard.read","users.read","payments.read","queue.read","audit.read"]),
+  support: new Set(["dashboard.read","users.read","payments.read","search.read","statistics.read","queue.read","audit.read"]),
 };
 
 export function hasPermission(session: AdminSession, permission: AdminPermission): boolean {
