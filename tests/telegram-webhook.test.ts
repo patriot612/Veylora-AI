@@ -42,6 +42,23 @@ describe("Telegram webhook integration", () => {
     await env.DB.prepare("UPDATE system_config SET config_value='30', updated_at='2026-09-28T12:00:00Z' WHERE config_key='limits.telegram_updates_per_minute'").run();
   });
 
+  it("enforces the configurable soft request cooldown", async () => {
+    const userId = 987654323;
+    await env.DB.prepare("DELETE FROM telegram_updates WHERE update_id IN (85201,85202,85203)").run();
+    await env.DB.prepare("DELETE FROM users WHERE telegram_user_id=?1").bind(userId).run();
+    await env.DB.prepare("INSERT INTO system_config(config_key,config_value,updated_at) VALUES ('limits.telegram_updates_per_minute','30','2026-09-28T12:00:00Z') ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value,updated_at=excluded.updated_at").run();
+    await env.DB.prepare("INSERT INTO system_config(config_key,config_value,updated_at) VALUES ('limits.request_cooldown_seconds','2','2026-09-28T12:00:00Z') ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value,updated_at=excluded.updated_at").run();
+    const headers = { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "test-secret" };
+    const first = await worker.default.fetch("https://example.test/telegram/webhook", { method: "POST", headers, body: JSON.stringify({ update_id: 85201, message: { from: { id: userId, first_name: "Cooldown" }, text: "/start" } }) });
+    const second = await worker.default.fetch("https://example.test/telegram/webhook", { method: "POST", headers, body: JSON.stringify({ update_id: 85202, message: { from: { id: userId, first_name: "Cooldown" }, text: "/start" } }) });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ ok: true, rate_limited: true });
+    const ignored = await env.DB.prepare("SELECT status,error_code FROM telegram_updates WHERE update_id=?1").bind(85202).first<{status:string;error_code:string}>();
+    expect(ignored?.status).toBe("ignored");
+    expect(ignored?.error_code).toBe("request_cooldown");
+  });
+
   it("rejects webhook requests without the configured secret", async () => {
     const response = await worker.default.fetch("https://example.test/telegram/webhook", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ update_id: 5002 }) });
     expect(response.status).toBe(401);
