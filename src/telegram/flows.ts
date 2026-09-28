@@ -191,7 +191,9 @@ export async function handleTelegramCallback(
     const model = await env.DB.prepare("SELECT display_name,points_cost,subscription_only FROM models WHERE id=?1 AND type='image' AND enabled=1").bind(modelId).first<{ display_name:string; points_cost:number; subscription_only:number }>();
     if (!model) throw new Error("image_model_unavailable");
     if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"));
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"), {
+        reply_markup: { inline_keyboard: [[{ text: t(locale, "account.plans"), callback_data: "account:plans" }],[{ text: t(locale, "models.backToFamilies"), callback_data: "menu:model" }]] },
+      });
       return true;
     }
     const prefs = await getUiPreferences(env.DB, userId);
@@ -262,7 +264,9 @@ export async function handleTelegramCallback(
     const model = await env.DB.prepare("SELECT subscription_only FROM models WHERE id=?1 AND type='chat' AND enabled=1").bind(modelId).first<{ subscription_only:number }>();
     if (!model) throw new Error("model_unavailable");
     if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"));
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"), {
+        reply_markup: { inline_keyboard: [[{ text: t(locale, "account.plans"), callback_data: "account:plans" }],[{ text: t(locale, "common.back"), callback_data: "menu:image" }]] },
+      });
       return true;
     }
     const ok = await setChatModel(env.DB, userId, modelId, now);
@@ -439,7 +443,9 @@ export async function handleTelegramCallback(
     const model = models.find((item) => item.id === modelId);
     if (!model) throw new Error("search_model_unavailable");
     if (model.subscriptionOnly && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"));
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"), {
+        reply_markup: { inline_keyboard: [[{ text: t(locale, "account.plans"), callback_data: "account:plans" }],[{ text: t(locale, "models.backToFamilies"), callback_data: "tool:search" }]] },
+      });
       return true;
     }
     const prefs = await getUiPreferences(env.DB, userId);
