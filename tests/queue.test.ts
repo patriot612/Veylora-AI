@@ -228,7 +228,7 @@ describe("heavy queue consumer", () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO users (id,telegram_user_id,daily_billing_day,daily_points_remaining,active_mode,active_document_session_id,created_at,updated_at) VALUES (?1,?2,'2026-09-28',48,'documents',?3,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(userId, 981000001, sessionId),
       env.DB.prepare("INSERT INTO operations (id,user_id,type,status,points_cost,telegram_delivery_status,temporary_result_ref,created_at) VALUES (?1,?2,'document','queued',2,'pending',?3,'2026-09-28T12:00:00Z')").bind(operationId, userId, sessionId),
-      env.DB.prepare("INSERT INTO point_reservations (id,operation_id,daily_amount,bonus_amount,status,created_at) VALUES (?1,?2,2,0,'reserved','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId),
+      env.DB.prepare("INSERT INTO point_reservations (id,operation_id,daily_amount,bonus_amount,daily_billing_day,status,created_at) VALUES (?1,?2,2,0,'2026-09-28','reserved','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId),
       env.DB.prepare("INSERT INTO queue_jobs (id,operation_id,queue_type,status,attempt,created_at,updated_at) VALUES (?1,?2,'document','processing',3,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId),
       env.DB.prepare("INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,'txt',20,'2026-09-29T12:00:00Z','2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(sessionId, userId),
       env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'temporary document','2026-09-29T12:00:00Z')").bind(crypto.randomUUID(), sessionId),
