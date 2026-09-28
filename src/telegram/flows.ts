@@ -71,7 +71,7 @@ export async function handleStartCommand(
   }
 
   if (command === "/paysupport") {
-    await sendTelegramMessage(botToken, chatId, "Поддержка платежей Veylora AI: отправьте номер заказа и кратко опишите проблему.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "payments.support"));
     return true;
   }
 
@@ -131,14 +131,14 @@ export async function handleTelegramCallback(
   if (data.startsWith("plan_buy:")) {
     const planId = data.slice("plan_buy:".length);
     const invoice = await createPlanInvoice({ db: env.DB, botToken, userId, chatId, planId, now });
-    await sendTelegramMessage(botToken, chatId, "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.");
+    await sendTelegramMessage(botToken, chatId, "error" in invoice ? t(locale, "payments.invoiceFailed", { reason: invoice.error }) : t(locale, "payments.invoiceCreated"));
     return true;
   }
 
   if (data === "menu:chat") {
     await setMode(env.DB, userId, "chat", now);
     if (callbackMessageId) await deleteTelegramMessage(botToken, chatId, callbackMessageId).catch(() => false);
-    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Просто отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
+    await sendTelegramMessage(botToken, chatId, t(locale, "mode.chat"), { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
@@ -150,11 +150,11 @@ export async function handleTelegramCallback(
       reply_markup: {
         inline_keyboard: [
           ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "image_model:" + model.id }]),
-          [{ text: "Размер 1024×1024", callback_data: "image_size:1024x1024" }, { text: "1536×1024", callback_data: "image_size:1536x1024" }],
-          [{ text: "Standard", callback_data: "image_quality:standard" }, { text: "HD", callback_data: "image_quality:hd" }],
-          [{ text: "PNG", callback_data: "image_format:png" }, { text: "WEBP", callback_data: "image_format:webp" }, { text: "JPG", callback_data: "image_format:jpg" }],
+          [{ text: t(locale, "image.size1"), callback_data: "image_size:1024x1024" }, { text: t(locale, "image.size2"), callback_data: "image_size:1536x1024" }],
+          [{ text: t(locale, "image.qualityStandard"), callback_data: "image_quality:standard" }, { text: t(locale, "image.qualityHd"), callback_data: "image_quality:hd" }],
+          [{ text: t(locale, "image.formatPng"), callback_data: "image_format:png" }, { text: t(locale, "image.formatWebp"), callback_data: "image_format:webp" }, { text: t(locale, "image.formatJpg"), callback_data: "image_format:jpg" }],
           ...(templates.results ?? []).slice(0, 6).map((template: { id: string; name: string; extra_points_cost: number }) => [{ text: "📐 " + template.name + " +" + template.extra_points_cost + " б.", callback_data: "image_template:" + template.id }]),
-          [{ text: "← В меню", callback_data: "menu:chat" }],
+          [{ text: t(locale, "common.toChat"), callback_data: "menu:chat" }],
         ],
       },
     });
@@ -168,8 +168,8 @@ export async function handleTelegramCallback(
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.imageTemplateId = templateId;
     await setUiPreferences(env.DB, userId, prefs);
-    await sendTelegramMessage(botToken, chatId, "Шаблон: " + template.name + "\n" + template.description + "\nДоплата: " + template.extra_points_cost + " б.", {
-      reply_markup: { inline_keyboard: [[{ text: "Использовать", callback_data: "image_template_use:" + templateId }],[{ text: "← Назад", callback_data: "menu:image" }]] },
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.templateDetail", { name: template.name, description: template.description, cost: template.extra_points_cost }), {
+      reply_markup: { inline_keyboard: [[{ text: t(locale, "image.templateUse"), callback_data: "image_template_use:" + templateId }],[{ text: t(locale, "common.back"), callback_data: "menu:image" }]] },
     });
     return true;
   }
@@ -182,7 +182,7 @@ export async function handleTelegramCallback(
     prefs.imageTemplateId = templateId;
     await setUiPreferences(env.DB, userId, prefs);
     await setMode(env.DB, userId, "image", now);
-    await sendTelegramMessage(botToken, chatId, "Шаблон \"" + template.name + "\" выбран. Отправьте описание изображения.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.templateSelected", { name: template.name }));
     return true;
   }
 
@@ -262,23 +262,23 @@ export async function handleTelegramCallback(
     const model = await env.DB.prepare("SELECT subscription_only FROM models WHERE id=?1 AND type='chat' AND enabled=1").bind(modelId).first<{ subscription_only:number }>();
     if (!model) throw new Error("model_unavailable");
     if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"));
       return true;
     }
     const ok = await setChatModel(env.DB, userId, modelId, now);
-    await sendTelegramMessage(botToken, chatId, ok ? "Модель Chat изменена." : "Модель недоступна.", { reply_markup: mainMenuKeyboard(false, locale) });
+    await sendTelegramMessage(botToken, chatId, ok ? t(locale, "models.changed") : t(locale, "models.unavailable"), { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
   if (data === "menu:dialogs") {
     const dialogs = await listActiveConversations(env.DB, userId);
-    await sendTelegramMessage(botToken, chatId, "📖 Мои диалоги", {
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.title"), {
       reply_markup: {
         inline_keyboard: [
           ...dialogs.slice(0, 10).map((dialog) => [{ text: dialog.title.slice(0, 45), callback_data: "dialog:" + dialog.id }, { text: "🗄", callback_data: "dialog:archive:" + dialog.id }]),
-          [{ text: "＋ Новый диалог", callback_data: "dialog:new" }],
-          [{ text: "Архив", callback_data: "dialogs:archive" }],
-          [{ text: "← В меню", callback_data: "menu:chat" }],
+          [{ text: t(locale, "menu.newDialog"), callback_data: "dialog:new" }],
+          [{ text: t(locale, "dialogs.archive"), callback_data: "dialogs:archive" }],
+          [{ text: t(locale, "common.toChat"), callback_data: "menu:chat" }],
         ],
       },
     });
@@ -304,28 +304,28 @@ export async function handleTelegramCallback(
     try {
       await createNewConversation(env.DB, { userId, title: "Новый диалог", now, expiresAt });
       await setMode(env.DB, userId, "chat", now);
-      await sendTelegramMessage(botToken, chatId, "Новый диалог создан. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
+      await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.newCreated"), { reply_markup: mainMenuKeyboard(false, locale) });
     } catch {
-      await sendTelegramMessage(botToken, chatId, "Сначала выберите доступную модель Chat.", { reply_markup: mainMenuKeyboard(false, locale) });
+      await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.selectModel"), { reply_markup: mainMenuKeyboard(false, locale) });
     }
     return true;
   }
 
   if (data.startsWith("dialog:archive:")) {
     await archiveConversation(env.DB, userId, data.slice("dialog:archive:".length), now);
-    await sendTelegramMessage(botToken, chatId, "Диалог отправлен в архив.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.archived"));
     return true;
   }
 
   if (data.startsWith("dialog:restore:")) {
     await restoreConversation(env.DB, userId, data.slice("dialog:restore:".length), now);
-    await sendTelegramMessage(botToken, chatId, "Диалог восстановлен.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.restored"));
     return true;
   }
 
   if (data.startsWith("dialog:delete:")) {
     await deleteArchivedConversation(env.DB, userId, data.slice("dialog:delete:".length), now);
-    await sendTelegramMessage(botToken, chatId, "Диалог удалён.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.deleted"));
     return true;
   }
 
@@ -335,7 +335,7 @@ export async function handleTelegramCallback(
     prefs.renameConversationId = conversationId;
     await setUiPreferences(env.DB, userId, prefs);
     await setMode(env.DB, userId, "dialog_rename", now);
-    await sendTelegramMessage(botToken, chatId, "Введите новое название диалога.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.renamePrompt"));
     return true;
   }
 
@@ -358,7 +358,7 @@ export async function handleTelegramCallback(
         },
       });
     } catch {
-      await sendTelegramMessage(botToken, chatId, "Не удалось открыть этот диалог.");
+      await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.openFailed"));
     }
     return true;
   }
@@ -392,15 +392,15 @@ export async function handleTelegramCallback(
     try {
       await continueConversation(env.DB, userId, conversationId, now);
       await setMode(env.DB, userId, "chat", now);
-      await sendTelegramMessage(botToken, chatId, "Диалог продолжен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
+      await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.continued"), { reply_markup: mainMenuKeyboard(false, locale) });
     } catch {
-      await sendTelegramMessage(botToken, chatId, "Не удалось открыть этот диалог.");
+      await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.openFailed"));
     }
     return true;
   }
 
   if (data === "menu:tools") {
-    await sendTelegramMessage(botToken, chatId, "🧰 Инструменты", { reply_markup: toolsKeyboard(locale) });
+    await sendTelegramMessage(botToken, chatId, t(locale, "tools.title"), { reply_markup: toolsKeyboard(locale) });
     return true;
   }
 
@@ -439,14 +439,14 @@ export async function handleTelegramCallback(
     const model = models.find((item) => item.id === modelId);
     if (!model) throw new Error("search_model_unavailable");
     if (model.subscriptionOnly && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"));
       return true;
     }
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.searchModelId = modelId;
     await setUiPreferences(env.DB, userId, prefs);
     await setMode(env.DB, userId, "search", now);
-    await sendTelegramMessage(botToken, chatId, "Search-модель выбрана. Отправьте запрос.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "search.modelSelected"));
     return true;
   }
 
@@ -481,11 +481,11 @@ export async function handleTelegramCallback(
 
   if (data === "tool:roles") {
     const roles = await listEnabledRoles(env.DB);
-    await sendTelegramMessage(botToken, chatId, "🎭 Roles", {
+    await sendTelegramMessage(botToken, chatId, t(locale, "menu.roles"), {
       reply_markup: {
         inline_keyboard: [
           ...roles.slice(0, 10).map((role) => [{ text: role.name, callback_data: "role:" + role.id }]),
-          [{ text: "← В меню", callback_data: "menu:chat" }],
+          [{ text: t(locale, "common.toChat"), callback_data: "menu:chat" }],
         ],
       },
     });
@@ -495,11 +495,11 @@ export async function handleTelegramCallback(
   if (data.startsWith("role:")) {
     const current = await env.DB.prepare("SELECT active_conversation_id FROM users WHERE id=?1").bind(userId).first<{ active_conversation_id: string | null }>();
     if (!current?.active_conversation_id) {
-      await sendTelegramMessage(botToken, chatId, "Сначала создайте или откройте диалог.");
+      await sendTelegramMessage(botToken, chatId, t(locale, "roles.selectFirst"));
       return true;
     }
     const ok = await setConversationRole(env.DB, userId, current.active_conversation_id, data.slice("role:".length), now);
-    await sendTelegramMessage(botToken, chatId, ok ? "Роль применена." : "Роль недоступна.");
+    await sendTelegramMessage(botToken, chatId, ok ? t(locale, "roles.applied") : t(locale, "roles.unavailable"));
     return true;
   }
 
@@ -540,7 +540,7 @@ export async function handleTelegramCallback(
 
   if (data === "account:orders") {
     const orders = await env.DB.prepare("SELECT id,plan_id,status,amount,currency,created_at,paid_at,refunded_at FROM orders WHERE user_id=?1 ORDER BY created_at DESC LIMIT 10").bind(userId).all<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string;paid_at:string|null;refunded_at:string|null}>();
-    await sendTelegramMessage(botToken, chatId, "Мои заказы\n\n" + ((orders.results ?? []).length ? (orders.results ?? []).map((order) => "#" + order.id.slice(0, 8) + " · " + order.plan_id + " · " + order.status + " · " + order.amount + " " + order.currency).join("\n") : t(locale, "orders.none")), {
+    await sendTelegramMessage(botToken, chatId, t(locale, "account.orders") + "\n\n" + ((orders.results ?? []).length ? (orders.results ?? []).map((order) => "#" + order.id.slice(0, 8) + " · " + order.plan_id + " · " + order.status + " · " + order.amount + " " + order.currency).join("\n") : t(locale, "orders.none")), {
       reply_markup: { inline_keyboard: [...(orders.results ?? []).slice(0, 10).map((order) => [{ text: "#" + order.id.slice(0, 8) + " · " + order.status, callback_data: "order:view:" + order.id }]), [ { text: t(locale, "common.toAccount"), callback_data: "menu:account" } ]] },
     });
     return true;
@@ -558,10 +558,10 @@ export async function handleTelegramCallback(
     await sendTelegramMessage(botToken, chatId, t(locale, "language.title"), {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "Русский", callback_data: "lang:ru" }, { text: "English", callback_data: "lang:en" }],
-          [{ text: "O'zbek", callback_data: "lang:uz" }, { text: "Français", callback_data: "lang:fr" }],
-          [{ text: "Deutsch", callback_data: "lang:de" }],
-          [{ text: "← Аккаунт", callback_data: "menu:account" }],
+          [{ text: t(locale, "language.russian"), callback_data: "lang:ru" }, { text: t(locale, "language.english"), callback_data: "lang:en" }],
+          [{ text: t(locale, "language.uzbek"), callback_data: "lang:uz" }, { text: t(locale, "language.french"), callback_data: "lang:fr" }],
+          [{ text: t(locale, "language.german"), callback_data: "lang:de" }],
+          [{ text: t(locale, "common.toAccount"), callback_data: "menu:account" }],
         ],
       },
     });
@@ -585,9 +585,9 @@ export async function handleTelegramCallback(
   if (data === "menu:admin") {
     if (await isAdminTelegramUser(env, telegramUserId)) {
       const adminUrl = new URL("/admin", requestUrl).toString();
-      await sendTelegramMessage(botToken, chatId, "Открыть Veylora Admin:", { reply_markup: { inline_keyboard: [[{ text: "🛠 Open Admin Mini App", web_app: { url: adminUrl } }]] } });
+      await sendTelegramMessage(botToken, chatId, t(locale, "admin.open"), { reply_markup: { inline_keyboard: [[{ text: t(locale, "admin.button"), web_app: { url: adminUrl } }]] } });
     } else {
-      await sendTelegramMessage(botToken, chatId, "Недостаточно прав.");
+      await sendTelegramMessage(botToken, chatId, t(locale, "admin.denied"));
     }
     return true;
   }
@@ -608,7 +608,7 @@ export async function handleDialogRenameText(
   const conversationId = typeof prefs.renameConversationId === "string" ? prefs.renameConversationId : "";
   if (!conversationId) {
     await setMode(env.DB, userId, "chat", now);
-    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Не удалось определить диалог.", { reply_markup: mainMenuKeyboard(false, locale) });
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(locale, "dialogs.openFailed"), { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
   const ok = await renameConversation(env.DB, userId, conversationId, text, now);
