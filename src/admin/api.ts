@@ -28,7 +28,7 @@ export async function handleAdminApi(
     { prefix: "templates", permission: "templates.write", handler: () => templates(env, request, session, parts.slice(1)) },
     { prefix: "plans", permission: "plans.write", handler: () => plans(env, request, session, parts.slice(1)) },
     { prefix: "payments", permission: "payments.read", handler: () => payments(env, request, session, parts.slice(1)) },
-    { prefix: "search", permission: "search.read", handler: () => search(env) },
+    { prefix: "search", permission: "search.read", handler: () => search(env, request, session) },
     { prefix: "statistics", permission: "statistics.read", handler: () => statistics(env) },
     { prefix: "queue", permission: "queue.read", handler: () => queue(env) },
     { prefix: "audit", permission: "audit.read", handler: () => audit(env) },
@@ -42,14 +42,41 @@ export async function handleAdminApi(
 }
 
 async function dashboard(env: Env, session: AdminSession) {
-  const [users, operations, queueJobs, subscriptions, payments] = await Promise.all([
+  const [users, dau, newUsers, operations, subscriptions, payments, points, queueJobs, searchErrors, providerErrors, failures] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE status!='deleted'").first<{count:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE status!='deleted' AND updated_at >= datetime('now','-1 day')").first<{count:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= datetime('now','-1 day') AND status!='deleted'").first<{count:number}>(),
     env.DB.prepare("SELECT COUNT(*) AS count FROM operations WHERE created_at >= datetime('now','-1 day')").first<{count:number}>(),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM queue_jobs WHERE status IN ('pending','processing')").first<{count:number}>(),
     env.DB.prepare("SELECT COUNT(*) AS count FROM subscriptions WHERE status='active'").first<{count:number}>(),
-    env.DB.prepare("SELECT COALESCE(SUM(amount),0) AS stars FROM orders WHERE status='paid' AND created_at >= datetime('now','-1 day')").first<{stars:number}>(),
+    env.DB.prepare("SELECT COALESCE(SUM(amount),0) AS stars FROM orders WHERE status IN ('paid','refunded') AND created_at >= datetime('now','-1 day')").first<{stars:number}>(),
+    env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN entry_type='capture' THEN amount ELSE 0 END),0) AS captured, COALESCE(SUM(CASE WHEN entry_type='release' THEN amount ELSE 0 END),0) AS released FROM point_ledger WHERE created_at >= datetime('now','-1 day')").first<{captured:number;released:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM queue_jobs WHERE status IN ('pending','processing')").first<{count:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM operations WHERE type='search' AND status IN ('failed','timeout') AND created_at >= datetime('now','-1 day')").first<{count:number}>(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM operations WHERE provider_error_code IS NOT NULL AND created_at >= datetime('now','-1 day')").first<{count:number}>(),
+    env.DB.prepare("SELECT status,COUNT(*) AS count FROM operations WHERE created_at >= datetime('now','-1 day') GROUP BY status").all<{status:string;count:number}>(),
   ]);
-  return Response.json({ ok: true, role: session.role, users: users?.count ?? 0, operations24h: operations?.count ?? 0, queuePending: queueJobs?.count ?? 0, activeSubscriptions: subscriptions?.count ?? 0, stars24h: payments?.stars ?? 0 }, { headers: noStore() });
+  const failureMap = Object.fromEntries((failures.results ?? []).map((row) => [row.status, row.count]));
+  const totalOps = operations?.count ?? 0;
+  const successRate = totalOps > 0 ? Number((((failureMap.succeeded ?? 0) / totalOps) * 100).toFixed(1)) : 0;
+  return Response.json({
+    ok: true,
+    role: session.role,
+    users: users?.count ?? 0,
+    dau: dau?.count ?? 0,
+    newUsers24h: newUsers?.count ?? 0,
+    operations24h: totalOps,
+    successRate,
+    errorCount24h: failureMap.failed ?? 0,
+    timeoutCount24h: failureMap.timeout ?? 0,
+    activeSubscriptions: subscriptions?.count ?? 0,
+    paidUsers: subscriptions?.count ?? 0,
+    stars24h: payments?.stars ?? 0,
+    pointsCaptured24h: points?.captured ?? 0,
+    pointsReleased24h: points?.released ?? 0,
+    queuePending: queueJobs?.count ?? 0,
+    searchErrors24h: searchErrors?.count ?? 0,
+    providerErrors24h: providerErrors?.count ?? 0,
+  }, { headers: noStore() });
 }
 
 async function users(env: Env, request: Request, session: AdminSession, segments: string[]) {
@@ -331,11 +358,28 @@ async function payments(env: Env, request: Request, session: AdminSession, segme
   await writeAudit(env.DB, await adminActorId(env.DB, session), "payment.refund", "order", orderId, session.role);
   return Response.json({ ok: true }, { headers: noStore() });
 }
-async function search(env: Env) {
+async function search(env: Env, request?: Request, session?: AdminSession) {
+  if (request && request.method !== "GET") {
+    assertPermission(session as AdminSession, "system.write");
+    const body = await request.json<Record<string, unknown>>();
+    const updates: Array<[string, string]> = [];
+    for (const [key, value] of Object.entries(body)) {
+      if (!["search.primary_url", "search.fallback_url", "search.enabled", "search.max_query_chars"].includes(key)) continue;
+      const normalized = typeof value === "boolean" ? (value ? "1" : "0") : String(value ?? "");
+      if (normalized.length > 2048) return Response.json({ error: "search_config_too_large" }, { status: 413, headers: noStore() });
+      updates.push([key, normalized]);
+    }
+    for (const [key, value] of updates) {
+      await env.DB.prepare("INSERT INTO system_config(config_key,config_value,updated_by_user_id,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at")
+        .bind(key, value, await adminActorId(env.DB, session as AdminSession), new Date().toISOString()).run();
+      await writeAudit(env.DB, await adminActorId(env.DB, session as AdminSession), "search.config.update", "system_config", key, (session as AdminSession).role);
+    }
+  }
   const rows = await env.DB.prepare(
     "SELECT o.id,o.user_id,u.telegram_user_id,o.model_id,m.display_name AS model_name,o.status,o.telegram_delivery_status,o.points_cost,o.error_code,o.created_at,o.finished_at FROM operations o JOIN users u ON u.id=o.user_id LEFT JOIN models m ON m.id=o.model_id WHERE o.type='search' ORDER BY o.created_at DESC LIMIT 200",
   ).all();
-  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+  const configRows = await env.DB.prepare("SELECT config_key,config_value FROM system_config WHERE config_key LIKE 'search.%' ORDER BY config_key").all();
+  return Response.json({ ok: true, rows: rows.results ?? [], config: configRows.results ?? [] }, { headers: noStore() });
 }
 
 async function statistics(env: Env) {
