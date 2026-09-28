@@ -29,7 +29,7 @@ describe("Search Gateway", () => {
 
   it("builds config with env primary fallback when D1 config is absent", async () => {
     const db = {
-      prepare(sql: string) {
+      prepare(_sql: string) {
         return {
           bind() {
             return {
