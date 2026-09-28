@@ -85,9 +85,7 @@ export async function processDocumentUploadJob(
       await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "processing", now: deps.now() });
     } else {
       await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "processing", now: deps.now() });
-      uploadSessionId = sessionId;
-
-    await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "delivering", now: deps.now() });
+      await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "delivering", now: deps.now() });
       await sendTelegramMessage(deps.botToken, chatId, "Документ готов. Задайте вопрос по содержимому.", {}, deps.fetchImpl ?? fetch);
       await deps.db.prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(message.operationId, message.userId).run();
       return { ok: true };
@@ -114,6 +112,8 @@ export async function processDocumentUploadJob(
       deps.db.prepare("UPDATE users SET active_document_session_id=?2, active_mode='documents', updated_at=?3 WHERE id=?1").bind(message.userId, sessionId, now),
       deps.db.prepare("UPDATE operations SET temporary_result_ref=?2, telegram_delivery_status='pending' WHERE id=?1 AND user_id=?3").bind(message.operationId, sessionId, message.userId),
     ]);
+
+    uploadSessionId = sessionId;
 
     await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "delivering", now: deps.now() });
     await sendTelegramMessage(deps.botToken, chatId, "Документ готов. Задайте вопрос по содержимому.", {}, deps.fetchImpl ?? fetch);
