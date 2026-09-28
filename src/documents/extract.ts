@@ -56,9 +56,9 @@ export async function extractDocument(
     );
     if (parts.join("\n").length >= maxChars) break;
   }
+  const pageCount = pdf.numPages;
   await pdf.destroy();
-  return { fileType, pages: pdf.numPages, text: normalizeText(parts.join("
-")).slice(0, maxChars) };
+  return { fileType, pages: pageCount, text: normalizeText(parts.join("\n")).slice(0, maxChars) };
 }
 
 export function chunkDocumentText(text: string, size = 2000, overlap = 200): string[] {
@@ -90,8 +90,8 @@ export function rankChunks(chunks: Array<{ id: string; content: string }>, query
 
 function extractDocxText(xml: string): string {
   return xml
-    .replace(/<w:tab\s*\/?>/g, " ")
-    .replace(/<w:br\s*\/?>/g, "\n")
+    .replace(/<w:tab\s*\/>/g, " ")
+    .replace(/<w:br\s*\/>/g, "\n")
     .replace(/<\/w:p>/g, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&amp;/g, "&")
