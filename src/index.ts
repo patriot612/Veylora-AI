@@ -1,4 +1,5 @@
 import { createAIGateway } from "./ai-gateway";
+import { getSystemConfig } from "./config";
 import { createDefaultProviderAdapters } from "./providers/factory";
 import { handleChatMessage } from "./chat/service";
 import { executeSearch } from "./search/service";
@@ -10,6 +11,7 @@ import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
 import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
+import { answerDocumentQuestion, enterDocumentsMode, exitDocumentsMode, processDocumentUpload } from "./documents/service";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -42,6 +44,10 @@ export default {
 
         if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
           const command = extractMessageText(update);
+          if (command === "/documents") {
+            await enterDocumentsMode(env.DB, user.id, now);
+            if (env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Documents mode включён. Отправьте PDF/DOCX/TXT до 10 МБ.");
+          }
           if (command === "/voice") {
             if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing");
             const mode = await enterVoiceMode(env.DB, user.id, now);
@@ -55,9 +61,39 @@ export default {
           }
         }
 
+        if (envelope.kind === "document" && envelope.document && typeof envelope.chat_id === "number") {
+          if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+          const result = await processDocumentUpload({
+            db: env.DB,
+            botToken: env.TELEGRAM_BOT_TOKEN,
+            userId: user.id,
+            fileId: envelope.document.fileId,
+            mimeType: envelope.document.mimeType,
+            fileName: envelope.document.fileName,
+            now,
+            encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!,
+          });
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in result ? "Не удалось обработать документ: " + result.error : "Документ принят. Задайте вопрос по содержимому.");
+        }
+
         if (envelope.kind === "text" && typeof envelope.text === "string" && typeof envelope.chat_id === "number" && typeof envelope.message_id === "number") {
           const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
-          if (activeMode?.active_mode === "voice") {
+          if (activeMode?.active_mode === "documents") {
+            if (!env.CREDENTIAL_ENCRYPTION_KEY || !env.TELEGRAM_BOT_TOKEN) throw new Error("document_runtime_secrets_missing");
+            const documentModelId = await getSystemConfig(env.DB, "default_chat_model_id");
+            const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
+            const result = await answerDocumentQuestion({
+              db: env.DB,
+              gateway,
+              userId: user.id,
+              question: envelope.text,
+              now,
+              modelId: documentModelId ?? undefined,
+              encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
+            });
+            if (result && "answer" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.answer);
+            else if (env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось получить ответ по документу: " + (result as {error:string}).error);
+          } else if (activeMode?.active_mode === "voice") {
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
             await handleVoiceTextWhileActive(env.TELEGRAM_BOT_TOKEN, envelope.chat_id);
           } else {
