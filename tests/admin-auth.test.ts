@@ -2,12 +2,6 @@ import { describe, expect, it } from "vitest";
 import { validateMiniAppInitData } from "../src/admin/auth";
 import { env } from "./test-env";
 
-async function hmacHex(keyText: string, data: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(keyText), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data)));
-  return Array.from(sig, (value) => value.toString(16).padStart(2, "0")).join("");
-}
-
 async function buildInitData(botToken: string, authDate: number, user: Record<string, unknown>) {
   const params = new URLSearchParams();
   params.set("auth_date", String(authDate));
