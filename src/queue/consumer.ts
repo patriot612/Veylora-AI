@@ -23,9 +23,7 @@ export async function processQueueMessage(
   }
 
   const job = await deps.db
-    .prepare(
-      "SELECT id, status, attempt FROM queue_jobs WHERE operation_id = ?1",
-    )
+    .prepare("SELECT id, status, attempt FROM queue_jobs WHERE operation_id = ?1")
     .bind(message.body.operationId)
     .first<{ id: string; status: string; attempt: number }>();
 
@@ -45,11 +43,28 @@ export async function processQueueMessage(
     .run();
 
   const operation = await deps.db
-    .prepare("SELECT status, user_id FROM operations WHERE id=?1 AND user_id=?2")
+    .prepare("SELECT status, user_id, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
     .bind(message.body.operationId, message.body.userId)
-    .first<{ status: string; user_id: string }>();
+    .first<{ status: string; user_id: string; telegram_delivery_status: string | null }>();
 
   if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) {
+    await deps.db
+      .prepare("UPDATE queue_jobs SET status='succeeded', updated_at=?2 WHERE operation_id=?1")
+      .bind(message.body.operationId, deps.now())
+      .run();
+    message.ack();
+    return "acked";
+  }
+
+  // A provider/media handler may have completed Telegram delivery and then lost
+  // the process before the reservation settlement. Never invoke the external
+  // handler again in that state: settle the existing operation idempotently.
+  if (operation.telegram_delivery_status === "sent") {
+    const settled = await settleReservation(deps.db, message.body.operationId, deps.now());
+    if (!settled) {
+      message.retry();
+      return "retried";
+    }
     await deps.db
       .prepare("UPDATE queue_jobs SET status='succeeded', updated_at=?2 WHERE operation_id=?1")
       .bind(message.body.operationId, deps.now())
