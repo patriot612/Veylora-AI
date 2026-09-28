@@ -193,6 +193,7 @@ export default {
           if (!query) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Использование: /search <запрос>");
           else {
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
+            const status = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.processing")).catch(() => null);
             const outcome = await executeSearch({
               db: env.DB,
               gateway,
@@ -206,14 +207,16 @@ export default {
             if (outcome.kind === "answered") {
               let telegramDelivered = false;
               try {
-                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, outcome.text);
+                if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, outcome.text);
+                else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, outcome.text);
                 telegramDelivered = true;
                 const settled = await completeSearchDelivery(env.DB, user.id, outcome.operationId, new Date().toISOString());
                 if (!settled) throw new Error("search_delivery_settlement_failed");
               } catch (error) {
                 if (!telegramDelivered) {
                   await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-                  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
+                  if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, t(locale, "search.deliveryFailed")).catch(() => false);
+                  else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
                 }
               }
             } else {
@@ -222,7 +225,8 @@ export default {
                 : outcome.kind === "insufficient_points"
                   ? t(locale, "billing.insufficient")
                   : t(locale, "search.failed");
-              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message);
+              if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, message).catch(() => false);
+              else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message);
             }
           }
         }
