@@ -70,8 +70,27 @@ export default {
     }
     return jsonResponse({ error: "not_found" }, 404);
   },
-  async queue(batch: MessageBatch<unknown>, _env: Env): Promise<void> {
-    for (const message of batch.messages) if (typeof message.body !== "object" || message.body === null) throw new Error("invalid_queue_message");
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    if (batch.queue === "veylora-ai-jobs-dlq") {
+      await processDeadLetterBatch(batch, env.DB, () => new Date().toISOString());
+      return;
+    }
+
+    await processQueueBatch(batch, {
+      db: env.DB,
+      now: () => new Date().toISOString(),
+      handlers: {
+        image: async (message) => processImageJob(message, {
+          db: env.DB,
+          gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()),
+          botToken: env.TELEGRAM_BOT_TOKEN!,
+          encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!,
+          now: () => new Date().toISOString(),
+        }),
+        voice: async () => ({ ok: false, retryable: false, code: "voice_handler_not_registered" }),
+        document: async () => ({ ok: false, retryable: false, code: "document_handler_not_registered" }),
+      },
+    });
   },
   async scheduled(_controller: ScheduledController, _env: Env): Promise<void> {},
 } satisfies ExportedHandler<Env>;
