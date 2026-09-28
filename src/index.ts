@@ -65,6 +65,7 @@ export default {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
           const result = await enqueueDocumentUpload({
             db: env.DB,
+            queue: env.AI_JOBS,
             userId: user.id,
             fileId: envelope.document.fileId,
             mimeType: envelope.document.mimeType,
