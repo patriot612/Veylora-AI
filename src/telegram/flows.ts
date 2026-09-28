@@ -1,4 +1,4 @@
-import { createNewConversation, continueConversation, archiveConversation, restoreConversation, deleteArchivedConversation, listActiveConversations, listArchivedConversations, setChatModel, setConversationRole, listEnabledRoles } from "../dialogs/service";
+import { createNewConversation, continueConversation, archiveConversation, restoreConversation, deleteArchivedConversation, getConversationHistory, listActiveConversations, listArchivedConversations, renameConversation, setChatModel, setConversationRole, listEnabledRoles } from "../dialogs/service";
 import { getActivePlan } from "../subscriptions";
 import { listSelectableModels } from "../models/registry";
 import { createPlanInvoice } from "../payments/service";
@@ -33,7 +33,7 @@ export async function handleStartCommand(
         "UPDATE users SET active_chat_model_id=COALESCE(active_chat_model_id,?2),active_mode='chat',updated_at=?3 WHERE id=?1",
       ).bind(userId, defaultModel.config_value, now).run();
     }
-    await sendTelegramMessage(botToken, chatId, "Привет! Выберите функцию или сразу задайте вопрос.", { reply_markup: mainMenuKeyboard(false) });
+    await sendTelegramMessage(botToken, chatId, "Привет! Выберите функцию или сразу задайте вопрос.", { reply_markup: mainMenuKeyboard(await isAdminTelegramUser(env, telegramUserId)) });
     return true;
   }
 
@@ -88,16 +88,43 @@ export async function handleTelegramCallback(
   if (data === "menu:image") {
     await setMode(env.DB, userId, "image", now);
     const models = await listSelectableModels(env.DB, { userId, type: "image", now });
-    await sendTelegramMessage(botToken, chatId, "🎨 Изображения\nВыберите модель, затем отправьте описание.", {
+    const templates = await env.DB.prepare("SELECT id,name,extra_points_cost FROM image_templates WHERE enabled=1 ORDER BY name LIMIT 12").all<{id:string;name:string;extra_points_cost:number}>();
+    await sendTelegramMessage(botToken, chatId, "🎨 Изображения\nВыберите модель, параметры или шаблон, затем отправьте описание.", {
       reply_markup: {
         inline_keyboard: [
           ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "image_model:" + model.id }]),
           [{ text: "Размер 1024×1024", callback_data: "image_size:1024x1024" }, { text: "1536×1024", callback_data: "image_size:1536x1024" }],
           [{ text: "Standard", callback_data: "image_quality:standard" }, { text: "HD", callback_data: "image_quality:hd" }],
+          ...templates.slice(0, 6).map((template) => [{ text: "📐 " + template.name + " +" + template.extra_points_cost + " б.", callback_data: "image_template:" + template.id }]),
           [{ text: "← В меню", callback_data: "menu:chat" }],
         ],
       },
     });
+    return true;
+  }
+
+  if (data.startsWith("image_template:")) {
+    const templateId = data.slice("image_template:".length);
+    const template = await env.DB.prepare("SELECT id,name,description,extra_points_cost FROM image_templates WHERE id=?1 AND enabled=1").bind(templateId).first<{id:string;name:string;description:string;extra_points_cost:number}>();
+    if (!template) throw new Error("image_template_unavailable");
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.imageTemplateId = templateId;
+    await setUiPreferences(env.DB, userId, prefs);
+    await sendTelegramMessage(botToken, chatId, "Шаблон: " + template.name + "\n" + template.description + "\nДоплата: " + template.extra_points_cost + " б.", {
+      reply_markup: { inline_keyboard: [[{ text: "Использовать", callback_data: "image_template_use:" + templateId }],[{ text: "← Назад", callback_data: "menu:image" }]] },
+    });
+    return true;
+  }
+
+  if (data.startsWith("image_template_use:")) {
+    const templateId = data.slice("image_template_use:".length);
+    const template = await env.DB.prepare("SELECT id,name FROM image_templates WHERE id=?1 AND enabled=1").bind(templateId).first<{id:string;name:string}>();
+    if (!template) throw new Error("image_template_unavailable");
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.imageTemplateId = templateId;
+    await setUiPreferences(env.DB, userId, prefs);
+    await setMode(env.DB, userId, "image", now);
+    await sendTelegramMessage(botToken, chatId, "Шаблон \"" + template.name + "\" выбран. Отправьте описание изображения.");
     return true;
   }
 
@@ -218,9 +245,44 @@ export async function handleTelegramCallback(
     return true;
   }
 
+  if (data.startsWith("dialog:rename:")) {
+    const conversationId = data.slice("dialog:rename:".length);
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.renameConversationId = conversationId;
+    await setUiPreferences(env.DB, userId, prefs);
+    await setMode(env.DB, userId, "dialog_rename", now);
+    await sendTelegramMessage(botToken, chatId, "Введите новое название диалога.");
+    return true;
+  }
+
   if (data.startsWith("dialog:")) {
+    const conversationId = data.slice("dialog:".length);
     try {
-      await continueConversation(env.DB, userId, data.slice("dialog:".length), now);
+      await continueConversation(env.DB, userId, conversationId, now);
+      const history = await getConversationHistory(env.DB, userId, conversationId);
+      const recent = history.slice(-6);
+      const summary = recent.length
+        ? recent.map((turn) => "👤 " + turn.userText + "\n🤖 " + turn.assistantText).join("\n\n")
+        : "Сообщений пока нет.";
+      await sendTelegramMessage(botToken, chatId, summary, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Продолжить", callback_data: "dialog_continue:" + conversationId }],
+            [{ text: "✏️ Переименовать", callback_data: "dialog:rename:" + conversationId }],
+            [{ text: "← Диалоги", callback_data: "menu:dialogs" }],
+          ],
+        },
+      });
+    } catch {
+      await sendTelegramMessage(botToken, chatId, "Не удалось открыть этот диалог.");
+    }
+    return true;
+  }
+
+  if (data.startsWith("dialog_continue:")) {
+    const conversationId = data.slice("dialog_continue:".length);
+    try {
+      await continueConversation(env.DB, userId, conversationId, now);
       await setMode(env.DB, userId, "chat", now);
       await sendTelegramMessage(botToken, chatId, "Диалог продолжен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
     } catch {
@@ -390,6 +452,7 @@ export async function handleImageText(
     modelId: typeof prefs.imageModelId === "string" ? prefs.imageModelId : undefined,
     size: typeof prefs.imageSize === "string" ? prefs.imageSize : undefined,
     quality: typeof prefs.imageQuality === "string" ? prefs.imageQuality : undefined,
+    templateId: typeof prefs.imageTemplateId === "string" ? prefs.imageTemplateId : undefined,
     telegramUpdateId,
     chatId,
     now,
