@@ -103,22 +103,26 @@ export default {
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
             const result = await answerDocumentQuestion({ db: env.DB, gateway, userId: user.id, question: envelope.text, now, modelId: documentModelId ?? undefined, encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
             if (result && "answer" in result) {
+              let telegramDelivered = false;
               try {
                 await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.answer);
+                telegramDelivered = true;
                 const settled = await completeDocumentQuestionDelivery(env.DB, user.id, result.operationId, new Date().toISOString());
                 if (!settled) throw new Error("document_question_delivery_settlement_failed");
               } catch (error) {
-                await releaseDocumentQuestionDelivery(
-                  env.DB,
-                  result.operationId,
-                  new Date().toISOString(),
-                  error instanceof Error ? error.message : "telegram_document_question_delivery_failed",
-                ).catch(() => false);
-                await sendTelegramMessage(
-                  env.TELEGRAM_BOT_TOKEN,
-                  envelope.chat_id,
-                  "Не удалось доставить ответ по документу. Баллы за не доставленный ответ не списаны.",
-                ).catch(() => false);
+                if (!telegramDelivered) {
+                  await releaseDocumentQuestionDelivery(
+                    env.DB,
+                    result.operationId,
+                    new Date().toISOString(),
+                    error instanceof Error ? error.message : "telegram_document_question_delivery_failed",
+                  ).catch(() => false);
+                  await sendTelegramMessage(
+                    env.TELEGRAM_BOT_TOKEN,
+                    envelope.chat_id,
+                    "Не удалось доставить ответ по документу. Баллы за не доставленный ответ не списаны.",
+                  ).catch(() => false);
+                }
               }
             } else {
               await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось получить ответ по документу: " + (result as {error:string}).error);
@@ -169,16 +173,17 @@ export default {
               credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
             });
             if (outcome.kind === "answered") {
+              let telegramDelivered = false;
               try {
                 await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, outcome.text);
+                telegramDelivered = true;
                 const settled = await completeSearchDelivery(env.DB, user.id, outcome.operationId, new Date().toISOString());
                 if (!settled) throw new Error("search_delivery_settlement_failed");
               } catch (error) {
-                await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-                const userMessage = error instanceof Error && error.message === "search_delivery_settlement_failed"
-                  ? "Ответ подготовлен, но завершение операции не удалось. Повторите поиск."
-                  : "Не удалось доставить результат поиска. Баллы за не доставленный ответ не списаны.";
-                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, userMessage).catch(() => false);
+                if (!telegramDelivered) {
+                  await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
+                  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось доставить результат поиска. Баллы за не доставленный ответ не списаны.").catch(() => false);
+                }
               }
             } else {
               const message = outcome.kind === "no_result"
