@@ -2,7 +2,7 @@ import { createAIGateway } from "./ai-gateway";
 import { getSystemConfig } from "./config";
 import { createDefaultProviderAdapters } from "./providers/factory";
 import { handleChatMessage } from "./chat/service";
-import { executeSearch } from "./search/service";
+import { completeSearchDelivery, executeSearch, releaseSearchDelivery } from "./search/service";
 import { claimTelegramUpdate, markTelegramUpdate, upsertTelegramUser } from "./db/telegram";
 import { hasValidWebhookSecret, isTelegramWebhookPath, jsonResponse } from "./http";
 import { editTelegramMessage, sendTelegramMessage } from "./telegram/api";
@@ -137,7 +137,39 @@ export default {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
           const query = commandText.slice("/search".length).trim();
           if (!query) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Использование: /search <запрос>");
-          else { const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters()); const outcome = await executeSearch({ db: env.DB, gateway, userId: user.id, query, telegramUpdateId: envelope.update_id, now, searxngUrl: env.SEARXNG_URL, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY }); const message = outcome.kind === "answered" ? outcome.text : outcome.kind === "no_result" ? "Результат не найден. Попробуйте изменить запрос." : outcome.kind === "insufficient_points" ? "У вас закончились баллы для Search Mode." : "Не удалось выполнить поиск. Попробуйте ещё раз."; await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message); }
+          else {
+            const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
+            const outcome = await executeSearch({
+              db: env.DB,
+              gateway,
+              userId: user.id,
+              query,
+              telegramUpdateId: envelope.update_id,
+              now,
+              searxngUrl: env.SEARXNG_URL,
+              credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
+            });
+            if (outcome.kind === "answered") {
+              try {
+                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, outcome.text);
+                const settled = await completeSearchDelivery(env.DB, user.id, outcome.operationId, new Date().toISOString());
+                if (!settled) throw new Error("search_delivery_settlement_failed");
+              } catch (error) {
+                await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
+                const userMessage = error instanceof Error && error.message === "search_delivery_settlement_failed"
+                  ? "Ответ подготовлен, но завершение операции не удалось. Повторите поиск."
+                  : "Не удалось доставить результат поиска. Баллы за не доставленный ответ не списаны.";
+                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, userMessage).catch(() => false);
+              }
+            } else {
+              const message = outcome.kind === "no_result"
+                ? "Результат не найден. Попробуйте изменить запрос."
+                : outcome.kind === "insufficient_points"
+                  ? "У вас закончились баллы для Search Mode."
+                  : "Не удалось выполнить поиск. Попробуйте ещё раз.";
+              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message);
+            }
+          }
         }
         await markTelegramUpdate(env.DB, envelope.update_id, "processed", new Date().toISOString());
         return jsonResponse({ ok: true });
