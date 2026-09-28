@@ -96,6 +96,71 @@ describe("heavy queue consumer", () => {
     expect(job?.status).toBe("succeeded");
   });
 
+  it("prevents concurrent duplicate deliveries from invoking the external handler twice", async () => {
+    const { userId, modelId } = await seedHeavyUser(50, 11);
+    const operationId = crypto.randomUUID();
+    const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,11,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+    await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 11, now: "2026-09-28T12:00:00Z" });
+
+    let handlerCalls = 0;
+    let releaseHandler!: () => void;
+    const handlerStarted = new Promise<void>((resolve) => {
+      releaseHandler = resolve;
+    });
+    const handler = async () => {
+      handlerCalls += 1;
+      await handlerStarted;
+      return { ok: true } as const;
+    };
+    const deps = {
+      db: env.DB,
+      now: () => "2026-09-28T12:01:00Z",
+      handlers: { image: handler, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
+    };
+
+    const first = processQueueMessage(fakeMessage(queue.sent[0]), deps);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const secondMessage = fakeMessage(queue.sent[0]);
+    const second = await processQueueMessage(secondMessage, deps);
+    expect(second).toBe("retried");
+    expect(secondMessage.retried).toBe(true);
+    expect(handlerCalls).toBe(1);
+
+    releaseHandler();
+    expect(await first).toBe("acked");
+    expect(handlerCalls).toBe(1);
+  });
+
+  it("reclaims a stale processing lease after a worker crash", async () => {
+    const { userId, modelId } = await seedHeavyUser(50, 12);
+    const operationId = crypto.randomUUID();
+    const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,12,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+    await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 12, now: "2026-09-28T12:00:00Z" });
+    await env.DB.prepare("UPDATE queue_jobs SET status='processing', attempt=1, updated_at='2026-09-28T12:00:00Z' WHERE operation_id=?1").bind(operationId).run();
+
+    let handlerCalls = 0;
+    const result = await processQueueMessage(fakeMessage(queue.sent[0]), {
+      db: env.DB,
+      now: () => "2026-09-28T12:11:00Z",
+      handlers: {
+        image: async () => {
+          handlerCalls += 1;
+          return { ok: true };
+        },
+        voice: async () => ({ ok: true }),
+        document: async () => ({ ok: true }),
+      },
+    });
+
+    const job = await env.DB.prepare("SELECT status, attempt FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string;attempt:number}>();
+    expect(result).toBe("acked");
+    expect(handlerCalls).toBe(1);
+    expect(job?.status).toBe("succeeded");
+    expect(job?.attempt).toBe(2);
+  });
+
   it("settles after Telegram delivery without invoking the external handler again", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 10);
     const operationId = crypto.randomUUID();
