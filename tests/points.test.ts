@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { env } from './test-env';
 import { describe, expect, it } from 'vitest';
 import { calculateReservation, releaseReservation, reservePoints, settleReservation } from '../src/billing/points';
 
