@@ -120,7 +120,14 @@ export async function processDocumentUploadJob(
     await deps.db.prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(message.operationId, message.userId).run();
     return { ok: true };
   } catch (error) {
-    if (error instanceof TelegramApiError && error.retryable) return { ok: false, retryable: true, code: "telegram_document_delivery_retry" };
+    if (error instanceof TelegramApiError && error.retryable) {
+      return {
+        ok: false,
+        retryable: true,
+        code: "telegram_document_delivery_retry",
+        ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+      };
+    }
     if (error instanceof Error && /timeout|temporary|5\\d\\d/i.test(error.message)) return { ok: false, retryable: true, code: error.message };
     if (operation.model_id === null && uploadSessionId) {
       await cleanupDocumentUploadSession(deps.db, message.userId, uploadSessionId);
