@@ -1,4 +1,6 @@
 export function renderAdminApp(): Response {
+  const nonceBytes = crypto.getRandomValues(new Uint8Array(16));
+  const nonce = Array.from(nonceBytes, (value) => value.toString(16).padStart(2, "0")).join("");
   const html = `<!doctype html>
 <html lang="ru">
 <head>
@@ -21,7 +23,7 @@ pre{white-space:pre-wrap;overflow:auto;background:#10131a;padding:12px;border-ra
 <body>
 <header><strong>Veylora Admin</strong><nav id="nav"></nav></header>
 <main id="app"><div class="card">Авторизация…</div></main>
-<script>
+<script nonce="${nonce}">
 const tg=window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 const initData=tg?.initData||"";
@@ -52,7 +54,7 @@ tabs.forEach(tab=>{const b=document.createElement("button");b.className="tab";b.
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "content-security-policy": "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "content-security-policy": "default-src 'self'; script-src 'self' https://telegram.org 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     },
   });
 }
