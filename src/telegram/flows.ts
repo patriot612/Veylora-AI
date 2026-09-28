@@ -6,6 +6,10 @@ import { handleImageRequest } from "../image/service";
 import { answerTelegramCallbackQuery, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
+import { enterDocumentsMode } from "../documents/service";
+import { enterVoiceMode } from "../voice/service";
+import { createAIGateway } from "../ai-gateway";
+import { createDefaultProviderAdapters } from "../providers/factory";
 
 type UserPrefs = Record<string, unknown>;
 
