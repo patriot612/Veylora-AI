@@ -37,7 +37,7 @@ async function seedVoiceUser(points = 50, cost = 8) {
   return { userId, modelId };
 }
 
-function gateway(modelId: string) {
+function gateway(_modelId: string) {
   const adapter: ProviderAdapter = {
     type: "voice_test",
     async invoke() {
