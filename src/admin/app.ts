@@ -40,11 +40,138 @@ async function render(tab){
       app.innerHTML='<div class="grid">'+
        [['Users',data.users],['Operations 24h',data.operations24h],['Queue pending',data.queuePending],['Subscriptions',data.activeSubscriptions],['Stars 24h',data.stars24h]].map(x=>'<div class="card"><div class="muted">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>').join('')+
        '</div>';
-   }else{
-      app.innerHTML='<div class="card"><div class="muted">'+esc(tab)+'</div><pre>'+esc(JSON.stringify(rows,null,2))+'</pre></div>';
+      return;
    }
+   if(tab==="users"){
+      app.innerHTML='<div class="card"><button data-action="search-users">Search users</button> <input id="user-query" placeholder="@username / Telegram ID" style="padding:10px;border-radius:8px;border:1px solid #303747;background:#10131a;color:#fff"/><div id="user-results"><pre>'+esc(JSON.stringify(rows,null,2))+'</pre></div></div>';
+      return;
+   }
+   if(tab==="models"){
+      app.innerHTML='<div class="card"><button data-action="refresh">Refresh</button><div>'+rows.map(r=>'<div class="card"><strong>'+esc(r.display_name)+'</strong><div class="muted">'+esc(r.type)+' · '+esc(r.provider_name)+' · '+esc(r.credential_name)+'</div><div>cost='+esc(r.points_cost)+' subscription='+esc(r.subscription_only)+' enabled='+esc(r.enabled)+'</div><button data-action="edit-model" data-id="'+esc(r.id)+'">Edit</button></div>').join('')+'</div></div>';
+      return;
+   }
+   if(tab==="providers"){
+      app.innerHTML='<div class="card"><button data-action="new-provider">Add provider</button>'+rows.map(r=>'<div class="card"><strong>'+esc(r.name)+'</strong><div class="muted">'+esc(r.adapter_type)+' · '+esc(r.endpoint)+'</div><div>enabled='+esc(r.enabled)+'</div><button data-action="edit-provider" data-id="'+esc(r.id)+'">Edit</button><button data-action="add-credential" data-id="'+esc(r.id)+'">Add credential</button></div>').join('')+'</div>';
+      return;
+   }
+   if(tab==="roles"){
+      app.innerHTML='<div class="card"><button data-action="new-role">Add role</button>'+rows.map(r=>'<div class="card"><strong>'+esc(r.name)+'</strong><div class="muted">'+esc(r.description)+'</div><button data-action="edit-role" data-id="'+esc(r.id)+'">Edit</button><button data-action="delete-role" data-id="'+esc(r.id)+'">Delete</button></div>').join('')+'</div>';
+      return;
+   }
+   if(tab==="templates"){
+      app.innerHTML='<div class="card"><button data-action="new-template">Add template</button>'+rows.map(r=>'<div class="card"><strong>'+esc(r.name)+'</strong><div class="muted">extra='+esc(r.extra_points_cost)+' enabled='+esc(r.enabled)+'</div><button data-action="edit-template" data-id="'+esc(r.id)+'">Edit</button></div>').join('')+'</div>';
+      return;
+   }
+   if(tab==="plans"){
+      app.innerHTML='<div class="card">'+rows.map(r=>'<div class="card"><strong>'+esc(r.name)+'</strong><div class="muted">⭐ '+esc(r.price_stars)+' · daily '+esc(r.daily_points)+' · retention '+esc(r.retention_hours)+'h · voice '+esc(r.voice_enabled)+'</div><button data-action="edit-plan" data-id="'+esc(r.id)+'">Edit</button></div>').join('')+'</div>';
+      return;
+   }
+   if(tab==="payments"){
+      app.innerHTML='<div class="card">'+rows.map(r=>'<div class="card"><strong>#'+esc(String(r.id).slice(0,8))+'</strong><div class="muted">'+esc(r.status)+' · '+esc(r.amount)+' '+esc(r.currency)+'</div>'+ (r.status==="paid" ? '<button data-action="refund" data-id="'+esc(r.id)+'">Refund</button>' : '') +'</div>').join('')+'</div>';
+      return;
+   }
+   if(tab==="config"){
+      app.innerHTML='<div class="card">'+rows.map(r=>'<div class="card"><strong>'+esc(r.config_key)+'</strong><pre>'+esc(r.config_value)+'</pre><button data-action="edit-config" data-key="'+esc(r.config_key)+'">Edit</button></div>').join('')+'</div>';
+      return;
+   }
+   app.innerHTML='<div class="card"><div class="muted">'+esc(tab)+'</div><pre>'+esc(JSON.stringify(rows,null,2))+'</pre></div>';
  }catch(e){app.innerHTML='<div class="card"><strong>Ошибка</strong><pre>'+esc(e.message)+'</pre></div>';}
 }
+async function userBonus(id){
+ const amount=prompt("Bonus points amount","10"); if(!amount) return;
+ await api("users/"+encodeURIComponent(id)+"/bonus",{method:"POST",body:JSON.stringify({amount:Number(amount)})});
+ await render("users");
+}
+async function editModel(id){
+ const points=prompt("Points cost"); if(points===null) return;
+ const enabled=confirm("Enable model?"); const subscriptionOnly=confirm("Subscription-only?");
+ await api("models/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({pointsCost:Number(points),enabled,subscriptionOnly})});
+ await render("models");
+}
+async function searchUsers(){
+ const q=document.getElementById("user-query")?.value||"";
+ const data=await api("users?q="+encodeURIComponent(q));
+ const rows=data.rows||[];
+ document.getElementById("user-results").innerHTML=rows.map(r=>'<div class="card"><strong>'+esc(r.first_name||r.username||r.telegram_user_id)+'</strong><div class="muted">'+esc(r.telegram_user_id)+' · '+esc(r.status)+'</div><button data-action="bonus-user" data-id="'+esc(r.telegram_user_id)+'">Grant bonus</button></div>').join('');
+}
+async function createProvider(){
+ const name=prompt("Provider name"); if(!name) return;
+ const adapterType=prompt("Adapter type","openai_compatible")||"openai_compatible";
+ const endpoint=prompt("Endpoint","https://")||"https://";
+ await api("providers",{method:"POST",body:JSON.stringify({name,adapterType,endpoint,enabled:true})});
+ await render("providers");
+}
+async function editProvider(id){
+ const name=prompt("Provider name"); if(!name) return;
+ const adapterType=prompt("Adapter type","openai_compatible")||"openai_compatible";
+ const endpoint=prompt("Endpoint","https://")||"https://";
+ await api("providers/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({name,adapterType,endpoint,enabled:true})});
+ await render("providers");
+}
+async function addCredential(id){
+ const name=prompt("Credential name"); if(!name) return;
+ const secret=prompt("Secret"); if(secret===null) return;
+ await api("providers/"+encodeURIComponent(id)+"/credentials/"+crypto.randomUUID(),{method:"POST",body:JSON.stringify({name,secret,enabled:true})});
+ await render("providers");
+}
+async function editRole(id){
+ const name=prompt("Role name"); if(!name) return;
+ const description=prompt("Description","")||"";
+ const systemPrompt=prompt("System prompt"); if(!systemPrompt) return;
+ await api("roles/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({name,description,systemPrompt,enabled:true})});
+ await render("roles");
+}
+async function editTemplate(id){
+ const name=prompt("Template name"); if(!name) return;
+ const description=prompt("Description","")||"";
+ const promptTemplate=prompt("Prompt template","{{prompt}}"); if(!promptTemplate) return;
+ const extraPointsCost=Number(prompt("Extra points cost","0")||"0");
+ await api("templates/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({name,description,promptTemplate,extraPointsCost,enabled:true})});
+ await render("templates");
+}
+async function editPlan(id){
+ const priceStars=Number(prompt("Price Stars")||"0");
+ const dailyPoints=Number(prompt("Daily points")||"0");
+ const retentionHours=Number(prompt("Retention hours")||"24");
+ const voiceEnabled=confirm("Voice enabled?");
+ await api("plans/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({priceStars,dailyPoints,retentionHours,voiceEnabled,enabled:true})});
+ await render("plans");
+}
+async function refundOrder(id){
+ if(!confirm("Refund this payment?")) return;
+ await api("payments/"+encodeURIComponent(id)+"/refund",{method:"POST"});
+ await render("payments");
+}
+async function editConfig(key){
+ const value=prompt("New value");
+ if(value===null) return;
+ await api("config",{method:"PUT",body:JSON.stringify({key,value})});
+ await render("config");
+}
+async function deleteRole(id){
+ if(!confirm("Delete role?")) return;
+ await api("roles/"+encodeURIComponent(id),{method:"DELETE"});
+ await render("roles");
+}
+app.addEventListener("click",async(event)=>{
+ const target=event.target.closest("[data-action]"); if(!target) return;
+ try{
+  const action=target.dataset.action; const id=target.dataset.id;
+  if(action==="refresh") return render(nav.querySelector(".tab")?.textContent||"dashboard");
+  if(action==="search-users") return searchUsers();
+  if(action==="bonus-user") return userBonus(id);
+  if(action==="edit-model") return editModel(id);
+  if(action==="new-provider") return createProvider();
+  if(action==="edit-provider") return editProvider(id);
+  if(action==="add-credential") return addCredential(id);
+  if(action==="edit-role") return editRole(id);
+  if(action==="delete-role") return deleteRole(id);
+  if(action==="edit-template") return editTemplate(id);
+  if(action==="edit-plan") return editPlan(id);
+  if(action==="refund") return refundOrder(id);
+  if(action==="edit-config") return editConfig(target.dataset.key);
+ }catch(e){app.innerHTML='<div class="card"><strong>Ошибка</strong><pre>'+esc(e.message)+'</pre></div>';}
+});
 tabs.forEach(tab=>{const b=document.createElement("button");b.className="tab";b.textContent=tab;b.onclick=()=>render(tab);nav.appendChild(b);});
 (async()=>{try{const session=await api("session");document.title="Veylora Admin — "+session.role;await render("dashboard");}catch(e){app.innerHTML='<div class="card"><strong>Доступ запрещён</strong><pre>'+esc(e.message)+'</pre></div>';}})();
 </script>
