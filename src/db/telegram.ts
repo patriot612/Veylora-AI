@@ -10,8 +10,9 @@ export type UpsertedUser = {
 };
 
 export type UpdateClaim =
-  | { duplicate: true; rateLimited: boolean }
-  | { duplicate: false; rateLimited: false };
+  | { duplicate: true; rateLimited: false }
+  | { duplicate: false; rateLimited: false }
+  | { duplicate: false; rateLimited: true };
 
 export async function upsertTelegramUser(db: D1Database, telegramUser: TelegramUser, now: string): Promise<UpsertedUser> {
   const existing = await db.prepare("SELECT id FROM users WHERE telegram_user_id = ?1").bind(telegramUser.id).first<{ id: string }>();
@@ -33,7 +34,7 @@ export async function claimTelegramUpdate(db: D1Database, updateId: number, user
   if (allowed) return { duplicate: false, rateLimited: false };
 
   await db.prepare("UPDATE telegram_updates SET status='ignored', processed_at=?2, error_code='rate_limited' WHERE update_id=?1").bind(updateId, now).run();
-  return { duplicate: true, rateLimited: true };
+  return { duplicate: false, rateLimited: true };
 }
 
 export async function markTelegramUpdate(db: D1Database, updateId: number, status: "processing" | "processed" | "ignored" | "failed", now: string, errorCode?: string): Promise<void> {
