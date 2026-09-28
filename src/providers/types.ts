@@ -20,7 +20,8 @@ export type GatewayRequest = {
 
 export type GatewayResponse =
   | { ok: true; kind: "text"; text: string; providerRequestId?: string; raw?: unknown }
-  | { ok: true; kind: "binary"; bytes: Uint8Array; contentType: string; providerRequestId?: string };
+  | { ok: true; kind: "binary"; bytes: Uint8Array; contentType: string; providerRequestId?: string }
+  | { ok: true; kind: "image"; url?: string; bytes?: Uint8Array; contentType?: string; providerRequestId?: string };
 
 export type ProviderGatewayErrorCode =
   | "provider_timeout"
