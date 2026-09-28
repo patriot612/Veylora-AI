@@ -7,6 +7,7 @@ import { enterDocumentsMode } from "../documents/service";
 import { enterVoiceMode } from "../voice/service";
 import { answerTelegramCallbackQuery, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
+import { getUserLocale, LANGUAGE_LABELS, t } from "../i18n";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
 import { createAIGateway } from "../ai-gateway";
 import { createDefaultProviderAdapters } from "../providers/factory";
@@ -24,6 +25,7 @@ export async function handleStartCommand(
 ): Promise<boolean> {
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) throw new Error("telegram_bot_token_missing");
+  const locale = await getUserLocale(env.DB, userId);
 
   if (command === "/start") {
     const defaultModel = await env.DB.prepare("SELECT config_value FROM system_config WHERE config_key='default_chat_model_id'")
@@ -33,19 +35,19 @@ export async function handleStartCommand(
         "UPDATE users SET active_chat_model_id=COALESCE(active_chat_model_id,?2),active_mode='chat',updated_at=?3 WHERE id=?1",
       ).bind(userId, defaultModel.config_value, now).run();
     }
-    await sendTelegramMessage(botToken, chatId, "Привет! Выберите функцию или сразу задайте вопрос.", { reply_markup: mainMenuKeyboard(await isAdminTelegramUser(env, telegramUserId)) });
+    await sendTelegramMessage(botToken, chatId, t(locale, "start.greeting"), { reply_markup: mainMenuKeyboard(await isAdminTelegramUser(env, telegramUserId), locale) });
     return true;
   }
 
   if (command === "/admin") {
     const allowed = await isAdminTelegramUser(env, telegramUserId);
     if (!allowed) {
-      await sendTelegramMessage(botToken, chatId, "Недостаточно прав.");
+      await sendTelegramMessage(botToken, chatId, t(locale, "admin.denied"));
       return true;
     }
     const adminUrl = new URL("/admin", requestUrl).toString();
-    await sendTelegramMessage(botToken, chatId, "Открыть Veylora Admin:", {
-      reply_markup: { inline_keyboard: [[{ text: "🛠 Open Admin Mini App", web_app: { url: adminUrl } }]] },
+    await sendTelegramMessage(botToken, chatId, t(locale, "admin.open"), {
+      reply_markup: { inline_keyboard: [[{ text: t(locale, "admin.button"), web_app: { url: adminUrl } }]] },
     });
     return true;
   }
@@ -81,7 +83,7 @@ export async function handleTelegramCallback(
 
   if (data === "menu:chat") {
     await setMode(env.DB, userId, "chat", now);
-    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Просто отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Просто отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
@@ -329,7 +331,7 @@ export async function handleTelegramCallback(
 
   if (data === "tool:documents") {
     await enterDocumentsMode(env.DB, userId, now);
-    await sendTelegramMessage(botToken, chatId, "📄 Documents Mode включён. PDF/DOCX/TXT до 10 МБ.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "documents.enabled"));
     return true;
   }
 
@@ -395,7 +397,7 @@ export async function handleTelegramCallback(
   }
 
   if (data === "account:language") {
-    await sendTelegramMessage(botToken, chatId, "Язык интерфейса", {
+    await sendTelegramMessage(botToken, chatId, t(locale, "language.title"), {
       reply_markup: {
         inline_keyboard: [
           [{ text: "Русский", callback_data: "lang:ru" }, { text: "English", callback_data: "lang:en" }],
@@ -527,12 +529,12 @@ async function deliverSearchOutcome(env: Env, userId: string, chatId: number, ou
     } catch (error) {
       if (!telegramDelivered) {
         await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Не удалось доставить результат поиска. Баллы за не доставленный ответ не списаны.").catch(() => false);
+        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(await getUserLocale(env.DB, userId), "search.deliveryFailed")).catch(() => false);
       }
     }
     return;
   }
-  const message = outcome.kind === "no_result" ? "Результат не найден. Попробуйте изменить запрос." : outcome.kind === "insufficient_points" ? "У вас закончились баллы для Search Mode." : "Не удалось выполнить поиск. Попробуйте ещё раз.";
+  const message = outcome.kind === "no_result" ? t(await getUserLocale(env.DB, userId), "search.noResult") : outcome.kind === "insufficient_points" ? t(await getUserLocale(env.DB, userId), "billing.insufficient") : t(await getUserLocale(env.DB, userId), "search.failed");
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
 }
 
