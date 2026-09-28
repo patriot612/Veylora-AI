@@ -31,7 +31,6 @@ export async function listSelectableModels(
   db: D1Database,
   input: { userId: string; type: ModelType; now: string },
 ): Promise<UserSelectableModel[]> {
-  const plan = await getActivePlan(db, input.userId, input.now);
   const result = await db.prepare(
     "SELECT m.id, m.family_id, f.name AS family_name, m.display_name, m.type, m.points_cost, m.subscription_only, m.context_window, m.max_output_tokens, m.capabilities FROM models m JOIN families f ON f.id = m.family_id WHERE m.type = ?1 AND m.enabled = 1 AND f.enabled = 1 ORDER BY f.sort_order ASC, m.display_name ASC",
   ).bind(input.type).all<ListRow>();
@@ -55,7 +54,7 @@ export async function resolveModel(
   input: { userId: string; modelId: string; expectedType: ModelType; now: string; credentialEncryptionKey: string },
 ): Promise<ResolvedModel> {
   const row = await db.prepare(
-    "SELECT m.id, m.family_id, f.name AS family_name, m.display_name, m.type, m.points_cost, m.subscription_only, m.context_window, m.max_output_tokens, m.capabilities, p.id AS provider_id, p.enabled AS provider_enabled, p.adapter_type AS provider_adapter_type, p.endpoint, m.provider_model_id, c.id AS credential_id, c.enabled AS credential_enabled, c.encrypted_secret, m.config FROM models m JOIN families f ON f.id = m.family_id JOIN providers p ON p.id = m.provider_id JOIN credentials c ON c.id = m.credential_id AND c.provider_id = p.id WHERE m.id = ?1 AND m.type = ?2 LIMIT 1",
+    "SELECT m.id, m.family_id, f.name AS family_name, m.display_name, m.type, m.points_cost, m.subscription_only, m.context_window, m.max_output_tokens, m.capabilities, p.id AS provider_id, p.enabled AS provider_enabled, p.adapter_type AS provider_adapter_type, p.endpoint, m.provider_model_id, c.id AS credential_id, c.enabled AS credential_enabled, c.encrypted_secret, m.config FROM models m JOIN families f ON f.id = m.family_id JOIN providers p ON p.id = m.provider_id JOIN credentials c ON c.id = m.credential_id AND c.provider_id = p.id WHERE m.id = ?1 AND m.type = ?2 AND m.enabled = 1 AND f.enabled = 1 LIMIT 1",
   ).bind(input.modelId, input.expectedType).first<ResolveRow>();
 
   if (!row) throw new Error("model_not_found");
