@@ -42,7 +42,7 @@ async function dashboard(env: Env, session: AdminSession) {
     env.DB.prepare("SELECT COUNT(*) AS count FROM operations WHERE created_at >= datetime('now','-1 day')").first<{count:number}>(),
     env.DB.prepare("SELECT COUNT(*) AS count FROM queue_jobs WHERE status IN ('pending','processing')").first<{count:number}>(),
     env.DB.prepare("SELECT COUNT(*) AS count FROM subscriptions WHERE status='active'").first<{count:number}>(),
-    env.DB.prepare("SELECT COALESCE(SUM(amount),0) AS stars FROM payments WHERE status='paid' AND created_at >= datetime('now','-1 day')").first<{stars:number}>(),
+    env.DB.prepare("SELECT COALESCE(SUM(amount),0) AS stars FROM orders WHERE status='paid' AND created_at >= datetime('now','-1 day')").first<{stars:number}>(),
   ]);
   return Response.json({ ok: true, role: session.role, users: users?.count ?? 0, operations24h: operations?.count ?? 0, queuePending: queueJobs?.count ?? 0, activeSubscriptions: subscriptions?.count ?? 0, stars24h: payments?.stars ?? 0 }, { headers: noStore() });
 }
