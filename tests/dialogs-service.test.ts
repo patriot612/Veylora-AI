@@ -13,7 +13,7 @@ import {
   restoreConversation,
   setChatModel,
   setConversationRole,
-} from "./service";
+} from "../src/dialogs/service";
 
 let tgId = 930000000;
 let seq = 0;
