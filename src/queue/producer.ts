@@ -35,6 +35,22 @@ export async function enqueueHeavyJob(input: EnqueueHeavyJobInput): Promise<void
     throw new Error(reservation.reason);
   }
 
+  const claimed = await input.db
+    .prepare(
+      "UPDATE operations SET status='queued', telegram_delivery_status='pending' WHERE id=?1 AND user_id=?2 AND status='reserved'",
+    )
+    .bind(input.operationId, input.userId)
+    .run();
+
+  if ((claimed.meta.changes ?? 0) !== 1) {
+    const latest = await input.db
+      .prepare("SELECT status FROM operations WHERE id=?1 AND user_id=?2")
+      .bind(input.operationId, input.userId)
+      .first<{ status: string }>();
+    if (latest?.status === "queued" || latest?.status === "processing" || latest?.status === "delivering" || latest?.status === "succeeded") return;
+    throw new Error("operation_not_enqueueable");
+  }
+
   const message: QueueJobMessage = {
     version: 1,
     operationId: input.operationId,
@@ -45,18 +61,12 @@ export async function enqueueHeavyJob(input: EnqueueHeavyJobInput): Promise<void
   };
 
   try {
-    await input.db.batch([
-      input.db
-        .prepare(
-          "INSERT INTO queue_jobs (id,operation_id,queue_type,status,attempt,created_at,updated_at) VALUES (?1,?2,?3,'pending',0,?4,?4)",
-        )
-        .bind(crypto.randomUUID(), input.operationId, input.jobType, input.now),
-      input.db
-        .prepare(
-          "UPDATE operations SET status='queued', telegram_delivery_status='pending' WHERE id=?1 AND user_id=?2 AND status='reserved'",
-        )
-        .bind(input.operationId, input.userId),
-    ]);
+    await input.db
+      .prepare(
+        "INSERT INTO queue_jobs (id,operation_id,queue_type,status,attempt,created_at,updated_at) VALUES (?1,?2,?3,'pending',0,?4,?4)",
+      )
+      .bind(crypto.randomUUID(), input.operationId, input.jobType, input.now)
+      .run();
     await input.queue.send(message);
   } catch (error) {
     await input.db
