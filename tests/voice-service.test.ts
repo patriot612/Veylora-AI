@@ -29,7 +29,7 @@ async function seedVoiceUser(points = 50, cost = 8) {
     "INSERT INTO credentials (id,provider_id,name,encrypted_secret,enabled,created_at,updated_at) VALUES (?1,?2,'Voice',?3,1,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')",
   ).bind(credentialId, providerId, await encryptCredentialSecret("secret", key)).run();
   await env.DB.prepare(
-    "INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) VALUES (?1,'family_gpt',?2,?3,'voice-model','Voice Test','voice',?4,1,NULL,NULL,'{}',1,'{"voice_reply_path":"/audio/replies"}','2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')",
+    "INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) VALUES (?1,'family_gpt',?2,?3,'voice-model','Voice Test','voice',?4,1,NULL,NULL,'{}',1,'{}','2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')",
   ).bind(modelId, providerId, credentialId, cost).run();
   await env.DB.prepare(
     "INSERT OR REPLACE INTO system_config (config_key,config_value,updated_at) VALUES ('default_voice_model_id',?1,'2026-09-28T12:00:00Z')",
