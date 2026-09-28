@@ -29,12 +29,27 @@ export async function claimTelegramUpdate(db: D1Database, updateId: number, user
   if (!userId) return { duplicate: false, rateLimited: false };
 
   const limit = Math.max(1, Math.min(1000, await getSystemConfigInt(db, "limits.telegram_updates_per_minute", 30)));
+  const cooldownSeconds = Math.max(0, Math.min(60, await getSystemConfigInt(db, "limits.request_cooldown_seconds", 2)));
   const bucketStart = minuteBucket(now);
   const allowed = await db.prepare(`INSERT INTO rate_limit_buckets (user_id, bucket_start, request_count) VALUES (?1, ?2, 1) ON CONFLICT(user_id, bucket_start) DO UPDATE SET request_count = request_count + 1 WHERE request_count < ?3 RETURNING request_count`).bind(userId, bucketStart, limit).first<{ request_count: number }>();
-  if (allowed) return { duplicate: false, rateLimited: false };
+  if (!allowed) {
+    await db.prepare("UPDATE telegram_updates SET status='ignored', processed_at=?2, error_code='rate_limited' WHERE update_id=?1").bind(updateId, now).run();
+    return { duplicate: false, rateLimited: true };
+  }
 
-  await db.prepare("UPDATE telegram_updates SET status='ignored', processed_at=?2, error_code='rate_limited' WHERE update_id=?1").bind(updateId, now).run();
-  return { duplicate: false, rateLimited: true };
+  if (cooldownSeconds > 0) {
+    const cooldown = await db.prepare(
+      "UPDATE users SET last_request_at=?2, updated_at=?2 WHERE id=?1 AND (last_request_at IS NULL OR (julianday(?2)-julianday(last_request_at))*86400 >= ?3)"
+    ).bind(userId, now, cooldownSeconds).run();
+    if ((cooldown.meta.changes ?? 0) !== 1) {
+      await db.prepare("UPDATE telegram_updates SET status='ignored', processed_at=?2, error_code='request_cooldown' WHERE update_id=?1").bind(updateId, now).run();
+      return { duplicate: false, rateLimited: true };
+    }
+  } else {
+    await db.prepare("UPDATE users SET last_request_at=?2, updated_at=?2 WHERE id=?1").bind(userId, now).run();
+  }
+
+  return { duplicate: false, rateLimited: false };
 }
 
 export async function markTelegramUpdate(db: D1Database, updateId: number, status: "processing" | "processed" | "ignored" | "failed", now: string, errorCode?: string): Promise<void> {
