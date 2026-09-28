@@ -156,7 +156,7 @@ export default {
                 }
               }
             } else {
-              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось получить ответ по документу: " + (result as {error:string}).error);
+              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "documents.answerFailed", { reason: (result as {error:string}).error }));
             }
           } else if (activeMode?.active_mode === "voice") {
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
@@ -188,8 +188,8 @@ export default {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing");
           if (!fileId) throw new Error("voice_file_id_missing");
           const result = await enqueueVoiceMessage({ db: env.DB, queue: env.AI_JOBS, userId: user.id, fileId, mimeType: voice && typeof voice.mime_type === "string" ? voice.mime_type : undefined, duration: voice && typeof voice.duration === "number" ? voice.duration : undefined, chatId: envelope.chat_id, telegramUpdateId: envelope.update_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
-          if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? t(locale, "voice.required") : "Не удалось принять голосовое сообщение. Попробуйте ещё раз.");
-          else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "🎙️ Обрабатываю голосовое сообщение...");
+          if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? t(locale, "voice.required") : t(locale, "voice.acceptFailed"));
+          else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "voice.processing"));
         }
         if (envelope.kind === "callback" && typeof envelope.chat_id === "number") {
           await handleTelegramCallback(env, request.url, user.id, user.telegramUserId, envelope.chat_id, envelope.callbackQueryId, envelope.callbackData ?? "", now, envelope.message_id);
@@ -198,7 +198,7 @@ export default {
         if (envelope.kind === "command" && commandText?.startsWith("/search") && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
           const query = commandText.slice("/search".length).trim();
-          if (!query) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Использование: /search <запрос>");
+          if (!query) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.usage"));
           else {
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
             const status = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.processing")).catch(() => null);
