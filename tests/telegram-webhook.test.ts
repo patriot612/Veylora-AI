@@ -32,11 +32,12 @@ describe("Telegram webhook integration", () => {
     const second = await worker.default.fetch("https://example.test/telegram/webhook", { method: "POST", headers, body: JSON.stringify({ update_id: 5102, message: { from: { id: userId, first_name: "Rate" }, text: "/start" } }) });
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    const secondBody = (await second.json()) as { ok?: boolean; duplicate?: boolean };
-    expect(secondBody).toEqual({ ok: true, duplicate: true });
+    const secondBody = (await second.json()) as { ok?: boolean; rate_limited?: boolean };
+    expect(secondBody).toEqual({ ok: true, rate_limited: true });
     const ignored = await env.DB.prepare("SELECT status,error_code FROM telegram_updates WHERE update_id=?1").bind(5102).first<{status:string;error_code:string}>();
     expect(ignored?.status).toBe("ignored");
     expect(ignored?.error_code).toBe("rate_limited");
+    await env.DB.prepare("UPDATE system_config SET config_value='30', updated_at='2026-09-28T12:00:00Z' WHERE config_key='limits.telegram_updates_per_minute'").run();
   });
 
   it("rejects webhook requests without the configured secret", async () => {
