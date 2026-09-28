@@ -96,6 +96,7 @@ export async function processQueueMessage(
 
     const settled = await settleReservation(deps.db, message.body.operationId, deps.now());
     if (!settled) {
+      await touchQueueJob(deps.db, message.body.operationId, deps.now());
       message.retry();
       return "retried";
     }
