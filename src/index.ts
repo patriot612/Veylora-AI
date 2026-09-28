@@ -19,6 +19,7 @@ import { renderAdminApp } from "./admin/app";
 import { handleAdminApi } from "./admin/api";
 import { validateMiniAppInitData } from "./admin/auth";
 import { loadAdminSession } from "./admin/rbac";
+import { getUserLocale, t } from "./i18n";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -69,10 +70,11 @@ export default {
         const now = new Date().toISOString();
         const user = envelope.user ? await upsertTelegramUser(env.DB, envelope.user, now) : null;
         const claim = await claimTelegramUpdate(env.DB, envelope.update_id, user?.id ?? null, now);
+        const locale = user ? await getUserLocale(env.DB, user.id) : "ru";
         if (claim.duplicate) return jsonResponse({ ok: true, duplicate: true });
         if (claim.rateLimited) {
           if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Слишком много запросов. Попробуйте немного позже.").catch(() => false);
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "rate_limited")).catch(() => false);
           }
           return jsonResponse({ ok: true, rate_limited: true });
         }
@@ -86,7 +88,7 @@ export default {
         if (envelope.kind === "payment" && envelope.payment && envelope.user && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
           const settled = await settleSuccessfulPayment({ db: env.DB, userId: user.id, telegramUserId: envelope.user.id, currency: envelope.payment.currency, totalAmount: envelope.payment.totalAmount, invoicePayload: envelope.payment.invoicePayload, telegramPaymentChargeId: envelope.payment.chargeId, now });
-          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in settled ? "Платёж получен, но активация подписки требует проверки." : "Подписка активирована. Спасибо!");
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in settled ? t(locale, "payments.review") : t(locale, "payments.active"));
         }
         if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
           const command = extractMessageText(update);
@@ -94,21 +96,21 @@ export default {
           if (typeof command === "string" && command.startsWith("/buy ")) {
             const planId = command.slice("/buy ".length).trim();
             const invoice = await createPlanInvoice({ db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN!, userId: user.id, chatId: envelope.chat_id, planId, now });
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.");
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, "error" in invoice ? t(locale, "payments.invoiceFailed", { reason: invoice.error }) : t(locale, "payments.invoiceCreated"));
           }
           if (typeof command === "string" && command === "/documents") {
             await enterDocumentsMode(env.DB, user.id, now);
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, "Documents mode включён. Отправьте PDF/DOCX/TXT до 10 МБ.");
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, t(locale, "documents.enabled"));
           }
           if (typeof command === "string" && command === "/voice") {
             const mode = await enterVoiceMode(env.DB, user.id, now);
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, mode.ok ? "Voice Mode включён. Отправьте голосовое сообщение." : "Voice Mode доступен только по активной подписке.");
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, mode.ok ? t(locale, "voice.enabled") : t(locale, "voice.required"));
           }
         }
         if (envelope.kind === "document" && envelope.document && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
           const result = await enqueueDocumentUpload({ db: env.DB, queue: env.AI_JOBS, userId: user.id, fileId: envelope.document.fileId, mimeType: envelope.document.mimeType, fileName: envelope.document.fileName, chatId: envelope.chat_id, now });
-          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in result ? "Не удалось обработать документ: " + result.error : "Документ принят. Задайте вопрос по содержимому.");
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in result ? t(locale, "documents.failed", { reason: result.error }) : t(locale, "documents.received"));
         }
         if (envelope.kind === "text" && typeof envelope.text === "string" && typeof envelope.chat_id === "number" && typeof envelope.message_id === "number") {
           const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
@@ -141,7 +143,7 @@ export default {
                   await sendTelegramMessage(
                     env.TELEGRAM_BOT_TOKEN,
                     envelope.chat_id,
-                    "Не удалось доставить ответ по документу. Баллы за не доставленный ответ не списаны.",
+                    t(locale, "search.deliveryFailed"),
                   ).catch(() => false);
                 }
               }
@@ -166,7 +168,7 @@ export default {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing");
           if (!fileId) throw new Error("voice_file_id_missing");
           const result = await enqueueVoiceMessage({ db: env.DB, queue: env.AI_JOBS, userId: user.id, fileId, mimeType: voice && typeof voice.mime_type === "string" ? voice.mime_type : undefined, duration: voice && typeof voice.duration === "number" ? voice.duration : undefined, chatId: envelope.chat_id, telegramUpdateId: envelope.update_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
-          if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? "Voice Mode доступен только по активной подписке." : "Не удалось принять голосовое сообщение. Попробуйте ещё раз.");
+          if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? t(locale, "voice.required") : "Не удалось принять голосовое сообщение. Попробуйте ещё раз.");
           else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "🎙️ Обрабатываю голосовое сообщение...");
         }
         if (envelope.kind === "callback" && typeof envelope.chat_id === "number") {
@@ -199,15 +201,15 @@ export default {
               } catch (error) {
                 if (!telegramDelivered) {
                   await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-                  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Не удалось доставить результат поиска. Баллы за не доставленный ответ не списаны.").catch(() => false);
+                  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
                 }
               }
             } else {
               const message = outcome.kind === "no_result"
-                ? "Результат не найден. Попробуйте изменить запрос."
+                ? t(locale, "search.noResult")
                 : outcome.kind === "insufficient_points"
-                  ? "У вас закончились баллы для Search Mode."
-                  : "Не удалось выполнить поиск. Попробуйте ещё раз.";
+                  ? t(locale, "billing.insufficient")
+                  : t(locale, "search.failed");
               await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message);
             }
           }
