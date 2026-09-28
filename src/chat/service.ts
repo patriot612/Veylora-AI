@@ -14,7 +14,7 @@ export type ChatRequest = {
   gateway: AIGateway;
   userId: string;
   text: string;
-  telegramUpdateId: number;
+  telegramUpdateId?: number;
   chatId: number;
   messageId: number;
   now: string;
@@ -30,6 +30,7 @@ export type ChatResult =
 export async function handleChatMessage(input: ChatRequest): Promise<ChatResult> {
   const text = input.text.trim();
   const locale = await getUserLocale(input.db, input.userId);
+  await rememberChatRetryText(input.db, input.userId, text);
   const maxChars = await getSystemConfigInt(input.db, "limits.chat_chars", 4096);
   if (!text || text.length > maxChars) {
     await safeSend(input.send, locale === "ru" ? `Максимальная длина сообщения — ${maxChars} символов.` : `${t(locale, "chat.failed")} (max ${maxChars})`);
@@ -171,6 +172,8 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
     const settled = await settleReservation(input.db, operation.operation.id, new Date().toISOString());
     if (!settled) throw new Error("settlement_failed");
 
+    await clearChatRetryText(input.db, input.userId);
+
     await input.db
       .prepare("UPDATE conversations SET updated_at = ?2, expires_at = ?3 WHERE id = ?1 AND user_id = ?4")
       .bind(conversation.id, input.now, await calculateConversationExpiry(input.db, input.userId, input.now), input.userId)
@@ -195,9 +198,9 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
       }).catch(() => false);
 
       if (temporaryMessageId) {
-        await safeEdit(input.edit, temporaryMessageId, t(locale, "chat.failed") + "\n" + t(locale, "common.retry"));
+        await safeEdit(input.edit, temporaryMessageId, t(locale, "chat.failed"), { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.retry"), callback_data: "chat_retry" }]] } });
       } else {
-        await safeSend(input.send, t(locale, "chat.failed") + "\n" + t(locale, "common.retry"));
+        await safeSend(input.send, t(locale, "chat.failed"), { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.retry"), callback_data: "chat_retry" }]] } });
       }
     }
 
@@ -318,4 +321,26 @@ async function safeEdit(
   } catch {
     return undefined;
   }
+}
+
+async function rememberChatRetryText(db: D1Database, userId: string, text: string): Promise<void> {
+  const row = await db.prepare("SELECT ui_preferences FROM user_settings WHERE user_id=?1").bind(userId).first<{ ui_preferences: string }>();
+  let prefs: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(row?.ui_preferences ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prefs = parsed as Record<string, unknown>;
+  } catch {}
+  prefs.lastChatText = text.slice(0, 4096);
+  await db.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(userId, JSON.stringify(prefs)).run();
+}
+
+async function clearChatRetryText(db: D1Database, userId: string): Promise<void> {
+  const row = await db.prepare("SELECT ui_preferences FROM user_settings WHERE user_id=?1").bind(userId).first<{ ui_preferences: string }>();
+  let prefs: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(row?.ui_preferences ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prefs = parsed as Record<string, unknown>;
+  } catch {}
+  delete prefs.lastChatText;
+  await db.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(userId, JSON.stringify(prefs)).run();
 }
