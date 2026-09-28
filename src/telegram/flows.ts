@@ -223,9 +223,9 @@ export async function handleTelegramCallback(
     try {
       await createNewConversation(env.DB, { userId, title: "Новый диалог", now, expiresAt });
       await setMode(env.DB, userId, "chat", now);
-      await sendTelegramMessage(botToken, chatId, "Новый диалог создан. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+      await sendTelegramMessage(botToken, chatId, "Новый диалог создан. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
     } catch {
-      await sendTelegramMessage(botToken, chatId, "Сначала выберите доступную модель Chat.", { reply_markup: mainMenuKeyboard(false) });
+      await sendTelegramMessage(botToken, chatId, "Сначала выберите доступную модель Chat.", { reply_markup: mainMenuKeyboard(false, locale) });
     }
     return true;
   }
@@ -311,7 +311,7 @@ export async function handleTelegramCallback(
     try {
       await continueConversation(env.DB, userId, conversationId, now);
       await setMode(env.DB, userId, "chat", now);
-      await sendTelegramMessage(botToken, chatId, "Диалог продолжен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+      await sendTelegramMessage(botToken, chatId, "Диалог продолжен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
     } catch {
       await sendTelegramMessage(botToken, chatId, "Не удалось открыть этот диалог.");
     }
@@ -319,7 +319,7 @@ export async function handleTelegramCallback(
   }
 
   if (data === "menu:tools") {
-    await sendTelegramMessage(botToken, chatId, "🧰 Инструменты", { reply_markup: toolsKeyboard() });
+    await sendTelegramMessage(botToken, chatId, "🧰 Инструменты", { reply_markup: toolsKeyboard(locale) });
     return true;
   }
 
@@ -392,12 +392,12 @@ export async function handleTelegramCallback(
 
   if (data === "tool:chat") {
     await setMode(env.DB, userId, "chat", now);
-    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
   if (data === "menu:account") {
-    await sendTelegramMessage(botToken, chatId, await accountSummary(env.DB, userId, now), { reply_markup: accountKeyboard() });
+    await sendTelegramMessage(botToken, chatId, await accountSummary(env.DB, userId, now), { reply_markup: accountKeyboard(locale) });
     return true;
   }
 
@@ -461,12 +461,12 @@ export async function handleTelegramCallback(
     const language = data.slice("lang:".length);
     if (!["ru", "en", "uz", "fr", "de"].includes(language)) throw new Error("invalid_language");
     await env.DB.prepare("UPDATE users SET language=?2,updated_at=?3 WHERE id=?1").bind(userId, language, now).run();
-    await sendTelegramMessage(botToken, chatId, "Язык сохранён.", { reply_markup: accountKeyboard() });
+    await sendTelegramMessage(botToken, chatId, "Язык сохранён.", { reply_markup: accountKeyboard(locale) });
     return true;
   }
 
   if (data === "menu:help") {
-    await sendTelegramMessage(botToken, chatId, "❓ Помощь\n\nChat — обычный диалог. Search — интернет-поиск с источниками. Documents — вопросы по PDF/DOCX/TXT. Voice — голосовые ответы по активной подписке. /paysupport — поддержка платежей.", { reply_markup: mainMenuKeyboard(false) });
+    await sendTelegramMessage(botToken, chatId, "❓ Помощь\n\nChat — обычный диалог. Search — интернет-поиск с источниками. Documents — вопросы по PDF/DOCX/TXT. Voice — голосовые ответы по активной подписке. /paysupport — поддержка платежей.", { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
 
@@ -491,11 +491,12 @@ export async function handleDialogRenameText(
   now: string,
 ): Promise<boolean> {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+  const locale = await getUserLocale(env.DB, userId);
   const prefs = await getUiPreferences(env.DB, userId);
   const conversationId = typeof prefs.renameConversationId === "string" ? prefs.renameConversationId : "";
   if (!conversationId) {
     await setMode(env.DB, userId, "chat", now);
-    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Не удалось определить диалог.", { reply_markup: mainMenuKeyboard(false) });
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Не удалось определить диалог.", { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
   const ok = await renameConversation(env.DB, userId, conversationId, text, now);
@@ -506,7 +507,7 @@ export async function handleDialogRenameText(
     env.TELEGRAM_BOT_TOKEN,
     chatId,
     ok ? "Диалог переименован." : "Не удалось переименовать диалог.",
-    { reply_markup: mainMenuKeyboard(false) },
+    { reply_markup: mainMenuKeyboard(false, locale) },
   );
   return true;
 }
