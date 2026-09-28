@@ -34,7 +34,6 @@ describe("Search Gateway", () => {
           bind() {
             return {
               async first<T>() {
-                const key = sql.match(/config_key=\?1/) ? "" : "";
                 return undefined as T | undefined;
               },
             };
