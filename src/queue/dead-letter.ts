@@ -19,7 +19,7 @@ export async function processDeadLetterBatch(
       .bind(message.body.operationId)
       .first<{ status: string }>();
     const operation = await db
-      .prepare("SELECT status, telegram_delivery_status FROM operations WHERE id = ?1 AND user_id = ?2")
+      .prepare("SELECT status, type, model_id, temporary_result_ref, telegram_delivery_status FROM operations WHERE id = ?1 AND user_id = ?2")
       .bind(message.body.operationId, message.body.userId)
       .first<{ status: string; type: string; model_id: string | null; temporary_result_ref: string | null; telegram_delivery_status: string }>();
 
