@@ -679,6 +679,7 @@ export async function handleSearchText(
     telegramUpdateId,
     now,
     searxngUrl: env.SEARXNG_URL,
+    searchAuthToken: env.SEARXNG_AUTH_TOKEN,
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
   });
   await deliverSearchOutcome(env, userId, chatId, outcome, status?.message_id);
