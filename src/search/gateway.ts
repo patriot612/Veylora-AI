@@ -17,7 +17,7 @@ export async function getSearchProviderConfig(
   envPrimaryUrl?: string,
   envAuthToken?: string,
 ): Promise<SearchProviderConfig> {
-  const [enabled, primary, fallback, maxQuery, language, categories, timeRange, safeSearch, token] = await Promise.all([
+  const [enabled, primary, fallback, maxQuery, language, categories, timeRange, safeSearch] = await Promise.all([
     getSystemConfig(db, "search.enabled"),
     getSystemConfig(db, "search.primary_url"),
     getSystemConfig(db, "search.fallback_url"),
