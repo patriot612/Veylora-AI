@@ -1,7 +1,7 @@
 type DocumentFileType = "pdf" | "docx" | "txt";
 
 import { getSystemConfig, getSystemConfigInt } from "../config";
-import { createOperation } from "../operations/service";
+import { createOperation, transitionOperation } from "../operations/service";
 import { enqueueHeavyJob } from "../queue/producer";
 import { reservePoints, releaseReservation, settleReservation } from "../billing/points";
 import type { AIGateway } from "../ai-gateway";
@@ -89,6 +89,12 @@ export async function processDocumentUploadJob(
 
   try {
     if (existingSessionId) {
+      await transitionOperation(deps.db, {
+        operationId: message.operationId,
+        userId: message.userId,
+        to: "delivering",
+        now: deps.now(),
+      });
       await sendTelegramMessage(
         deps.botToken,
         chatId,
@@ -96,6 +102,10 @@ export async function processDocumentUploadJob(
         {},
         deps.fetchImpl ?? fetch,
       );
+      await deps.db
+        .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2")
+        .bind(message.operationId, message.userId)
+        .run();
       return { ok: true };
     }
 
@@ -135,7 +145,17 @@ export async function processDocumentUploadJob(
       ).bind(message.operationId, sessionId, message.userId),
     ]);
 
+    await transitionOperation(deps.db, {
+      operationId: message.operationId,
+      userId: message.userId,
+      to: "delivering",
+      now: deps.now(),
+    });
     await sendTelegramMessage(deps.botToken, chatId, "Документ готов. Задайте вопрос по содержимому.", {}, deps.fetchImpl ?? fetch);
+    await deps.db
+      .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2")
+      .bind(message.operationId, message.userId)
+      .run();
     return { ok: true };
   } catch (error) {
     if (error instanceof TelegramApiError && error.retryable) {
