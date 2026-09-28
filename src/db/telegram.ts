@@ -3,6 +3,9 @@ import type { TelegramUser } from "../telegram/router";
 export type UpsertedUser = {
   id: string;
   telegramUserId: number;
+  telegram_user_id: number;
+  username?: string;
+  first_name?: string;
 };
 
 export type UpdateClaim =
@@ -40,7 +43,13 @@ export async function upsertTelegramUser(db: D1Database, telegramUser: TelegramU
     .bind(id)
     .run();
 
-  return { id, telegramUserId: telegramUser.id };
+  return {
+    id,
+    telegramUserId: telegramUser.id,
+    telegram_user_id: telegramUser.id,
+    ...(telegramUser.username ? { username: telegramUser.username } : {}),
+    ...(telegramUser.first_name ? { first_name: telegramUser.first_name } : {}),
+  };
 }
 
 export async function claimTelegramUpdate(
