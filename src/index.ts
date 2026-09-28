@@ -6,6 +6,8 @@ import { claimTelegramUpdate, markTelegramUpdate, upsertTelegramUser } from "./d
 import { hasValidWebhookSecret, isTelegramWebhookPath, jsonResponse } from "./http";
 import { editTelegramMessage, sendTelegramMessage } from "./telegram/api";
 import { classifyTelegramUpdate } from "./telegram/router";
+import { processQueueBatch } from "./queue/consumer";
+import { processDeadLetterBatch } from "./queue/dead-letter";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
