@@ -93,7 +93,7 @@ export async function processVoiceJob(
   },
 ): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string }> {
   const operation = await deps.db
-    .prepare("SELECT status, model_id FROM operations WHERE id=?1 AND user_id=?2")
+    .prepare("SELECT status, model_id, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
     .bind(message.operationId, message.userId)
     .first<{ status: string; model_id: string | null; telegram_delivery_status: string }>();
 
