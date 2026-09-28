@@ -59,7 +59,9 @@ describe("model registry", () => {
     const freeUser = crypto.randomUUID();
     const freeIds = await seedBase(freeUser);
     await env.DB.prepare("UPDATE models SET subscription_only = 1 WHERE id=?1").bind(freeIds.modelId).run();
-    expect((await listSelectableModels(env.DB, { userId: freeUser, type: "chat", now: "2026-09-28T12:00:00Z" })).some((m) => m.id === freeIds.modelId)).toBe(false);
+    const freeModels = await listSelectableModels(env.DB, { userId: freeUser, type: "chat", now: "2026-09-28T12:00:00Z" });
+    expect(freeModels.find((m) => m.id === freeIds.modelId)?.subscriptionOnly).toBe(true);
+    await expect(resolveModel(env.DB, { userId: freeUser, modelId: freeIds.modelId, expectedType: "chat", now: "2026-09-28T12:00:00Z", credentialEncryptionKey: masterKey })).rejects.toThrow("subscription_required");
 
     const subscribedUser = crypto.randomUUID();
     const paidIds = await seedBase(subscribedUser, true);
