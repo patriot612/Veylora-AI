@@ -5,7 +5,7 @@ import { isQueueJobMessage } from "./types";
 
 export type HeavyJobHandler = (
   message: QueueJobMessage,
-) => Promise<{ ok: true; terminal?: boolean } | { ok: false; retryable: boolean; code: string }>;
+) => Promise<{ ok: true; terminal?: boolean } | { ok: false; retryable: boolean; code: string; retryAfterSeconds?: number }>;
 
 export type QueueConsumerDeps = {
   db: D1Database;
@@ -82,7 +82,7 @@ export async function processQueueMessage(
     if (!result.ok) {
       if (result.retryable) {
         await touchQueueJob(deps.db, message.body.operationId, deps.now());
-        message.retry();
+        retryMessage(message, result.retryAfterSeconds);
         return "retried";
       }
       await releaseReservation(deps.db, message.body.operationId, deps.now(), "failed", result.code);
@@ -166,6 +166,14 @@ async function touchQueueJob(db: D1Database, operationId: string, now: string): 
     .prepare("UPDATE queue_jobs SET updated_at=?2 WHERE operation_id=?1 AND status='processing'")
     .bind(operationId, now)
     .run();
+}
+
+function retryMessage(message: Message<unknown>, retryAfterSeconds?: number): void {
+  if (Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds > 0) {
+    message.retry({ delaySeconds: Math.min(86400, retryAfterSeconds) });
+  } else {
+    message.retry();
+  }
 }
 
 export async function processQueueBatch(
