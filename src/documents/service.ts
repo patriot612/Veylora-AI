@@ -140,7 +140,11 @@ export async function answerDocumentQuestion(input: { db: D1Database; gateway: A
   const operation = await createOperation(input.db, { userId: input.userId, type: "document", pointsCost: questionCost, modelId: model.id, now: input.now, requestHash: question.slice(0, 64) });
   if (operation.duplicate) return { error: "duplicate_document_question" };
   const reservation = await reservePoints(input.db, input.userId, operation.operation.id, questionCost, input.now);
-  if (!reservation.ok) return { error: "insufficient_points" };
+  if (!reservation.ok) {
+    await input.db.prepare("UPDATE operations SET status='failed', error_code=?3, finished_at=?4 WHERE id=?1 AND user_id=?2 AND status='created'")
+      .bind(operation.operation.id, input.userId, reservation.reason, input.now).run();
+    return { error: "insufficient_points" };
+  }
   await transitionOperation(input.db, { operationId: operation.operation.id, userId: input.userId, to: "processing", now: input.now });
   try {
     const rows = await input.db.prepare("SELECT id, content FROM document_chunks WHERE session_id=?1 AND expires_at>?2 ORDER BY chunk_index ASC").bind(session.id, input.now).all<{id:string;content:string}>();
