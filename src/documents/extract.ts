@@ -1,5 +1,5 @@
 import { unzipSync } from "fflate";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { extractText, getDocumentProxy } from "unpdf";
 import { getSystemConfigInt } from "../config";
 
 export type ExtractedDocument = {
@@ -32,32 +32,18 @@ export async function extractDocument(
     return { fileType, text: normalizeText(text).slice(0, maxChars) };
   }
 
-  const pdf = await getDocument({
-    data: new Uint8Array(bytes),
-    disableWorker: true,
-    useWorkerFetch: false,
-    isEvalSupported: false,
-  }).promise;
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
   const maxPages = await getSystemConfigInt(db, "limits.document_pdf_pages", 50);
   if (pdf.numPages > maxPages) {
-    await pdf.destroy();
+    await pdf.loadingTask.destroy();
     throw new Error("document_pdf_page_limit");
   }
 
-  const parts: string[] = [];
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    parts.push(
-      content.items
-        .map((item: unknown) => typeof item === "object" && item !== null && "str" in item && typeof (item as { str?: unknown }).str === "string" ? (item as { str: string }).str : "")
-        .filter(Boolean)
-        .join(" "),
-    );
-    if (parts.join("\n").length >= maxChars) break;
-  }
+  const { text: pageTexts } = await extractText(pdf);
+  const text = (pageTexts as string[]).slice(0, maxPages).join("\n");
   const pageCount = pdf.numPages;
-  await pdf.destroy();
+  await pdf.loadingTask.destroy();
+  return { fileType, pages: pageCount, text: normalizeText(text).slice(0, maxChars) };
   return { fileType, pages: pageCount, text: normalizeText(parts.join("\n")).slice(0, maxChars) };
 }
 
