@@ -192,6 +192,15 @@ export async function settleSuccessfulPayment(input: {
         .bind(subscriptionId, order.user_id, order.plan_id, startsAt, endsAt),
     ]);
     if ((result[0].meta.changes ?? 0) !== 1) throw new Error("payment_order_already_settled");
+    await input.db.prepare(
+      "INSERT INTO audit_log (id,actor_user_id,event_type,target_type,target_id,safe_metadata,created_at) VALUES (?1,?2,'payment.success','order',?3,?4,?5)",
+    ).bind(
+      crypto.randomUUID(),
+      order.user_id,
+      orderId,
+      JSON.stringify({ provider: "telegram_stars", amount: input.totalAmount, currency: input.currency }),
+      input.now,
+    ).run();
     return { orderId, subscriptionId, duplicate: false };
   } catch (error) {
     const settled = await input.db
