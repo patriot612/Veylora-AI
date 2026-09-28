@@ -7,7 +7,7 @@ import { enterDocumentsMode } from "../documents/service";
 import { enterVoiceMode } from "../voice/service";
 import { answerTelegramCallbackQuery, editTelegramMessage, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
-import { getUserLocale, LANGUAGE_LABELS, t } from "../i18n";
+import { getUserLocale, t } from "../i18n";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
 import { createAIGateway } from "../ai-gateway";
 import { createDefaultProviderAdapters } from "../providers/factory";
@@ -427,7 +427,6 @@ export async function handleTelegramCallback(
 
   if (data === "account:orders") {
     const orders = await env.DB.prepare("SELECT id,plan_id,status,amount,currency,created_at,paid_at,refunded_at FROM orders WHERE user_id=?1 ORDER BY created_at DESC LIMIT 10").bind(userId).all<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string;paid_at:string|null;refunded_at:string|null}>();
-    const text = (orders.results ?? []).map((order) => ({...order})).map((order) => "order:view:" + order.id).join("\n");
     await sendTelegramMessage(botToken, chatId, "Мои заказы\n\n" + ((orders.results ?? []).length ? (orders.results ?? []).map((order) => "#" + order.id.slice(0, 8) + " · " + order.plan_id + " · " + order.status + " · " + order.amount + " " + order.currency).join("\n") : t(locale, "orders.none")), {
       reply_markup: { inline_keyboard: [...(orders.results ?? []).slice(0, 10).map((order) => [{ text: "#" + order.id.slice(0, 8) + " · " + order.status, callback_data: "order:view:" + order.id }]), [ { text: t(locale, "common.toAccount"), callback_data: "menu:account" } ]] },
     });
