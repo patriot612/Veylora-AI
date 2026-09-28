@@ -22,6 +22,7 @@ export type TelegramUpdateEnvelope = {
   chat_id?: number;
   message_id?: number;
   text?: string;
+  callbackData?: string;
 };
 
 export function classifyTelegramUpdate(update: Record<string, unknown>): TelegramUpdateEnvelope {
@@ -47,7 +48,13 @@ export function classifyTelegramUpdate(update: Record<string, unknown>): Telegra
   }
 
   if (isRecord(update.callback_query)) {
-    return { update_id: updateId, user: asTelegramUser(update.callback_query.from), kind: "callback" };
+    return {
+      update_id: updateId,
+      user: asTelegramUser(update.callback_query.from),
+      kind: "callback",
+      ...(typeof update.callback_query.data === "string" ? { callbackData: update.callback_query.data } : {}),
+      ...(isRecord(update.callback_query.message) && typeof update.callback_query.message.chat === "object" && update.callback_query.message.chat !== null && typeof (update.callback_query.message.chat as Record<string, unknown>).id === "number" ? { chat_id: (update.callback_query.message.chat as Record<string, unknown>).id as number } : {}),
+    };
   }
 
   if (isRecord(update.pre_checkout_query)) {
