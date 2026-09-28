@@ -14,3 +14,6 @@ INSERT OR IGNORE INTO system_config (config_key, config_value, updated_at) VALUE
   ('search.safe_search', '0', '2026-09-28T00:00:00Z'),
   ('search.primary_url', '', '2026-09-28T00:00:00Z'),
   ('search.fallback_url', '', '2026-09-28T00:00:00Z');
+
+INSERT OR IGNORE INTO system_config (config_key, config_value, updated_at) VALUES
+  ('system.maintenance_mode', '0', '2026-09-28T00:00:00Z');
