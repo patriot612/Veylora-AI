@@ -73,6 +73,14 @@ describe("Admin Mini App HTTP surface", () => {
     expect(dashboard.status).toBe(200);
     expect((await dashboard.json() as { ok: boolean }).ok).toBe(true);
 
+    const search = await worker.default.fetch("https://example.test/admin/api/search", { headers });
+    expect(search.status).toBe(200);
+    expect((await search.json() as { ok: boolean }).ok).toBe(true);
+
+    const statistics = await worker.default.fetch("https://example.test/admin/api/statistics", { headers });
+    expect(statistics.status).toBe(200);
+    expect((await statistics.json() as { ok: boolean }).ok).toBe(true);
+
     const configWrite = await worker.default.fetch("https://example.test/admin/api/config", {
       method: "PUT",
       headers: { ...headers, "content-type": "application/json" },
