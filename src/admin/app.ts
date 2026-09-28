@@ -72,6 +72,24 @@ async function render(tab){
       app.innerHTML='<div class="card">'+rows.map(r=>'<div class="card"><strong>#'+esc(String(r.id).slice(0,8))+'</strong><div class="muted">'+esc(r.status)+' · '+esc(r.amount)+' '+esc(r.currency)+'</div>'+ (r.status==="paid" ? '<button data-action="refund" data-id="'+esc(r.id)+'">Refund</button>' : '') +'</div>').join('')+'</div>';
       return;
    }
+   if(tab==="search"){
+      const cfg=Object.fromEntries((data.config||[]).map(x=>[x.config_key,x.config_value]));
+      app.innerHTML='<div class="card"><strong>Search Gateway</strong>'+
+       '<label>Enabled <input id="search-enabled" type="checkbox" '+(cfg["search.enabled"]!=="0"?"checked":"")+' /></label>'+
+       '<div><label>Primary URL<br/><input id="search-primary" value="'+esc(cfg["search.primary_url"]||"")+'" style="width:100%"/></label></div>'+
+       '<div><label>Fallback URL<br/><input id="search-fallback" value="'+esc(cfg["search.fallback_url"]||"")+'" style="width:100%"/></label></div>'+
+       '<div><label>Language<br/><input id="search-language" value="'+esc(cfg["search.language"]||"all")+'" /></label></div>'+
+       '<div><label>Categories<br/><input id="search-categories" value="'+esc(cfg["search.categories"]||"general")+'" /></label></div>'+
+       '<div><label>Time range<br/><input id="search-time" value="'+esc(cfg["search.time_range"]||"")+'" placeholder="day/week/month/year"/></label></div>'+
+       '<div><label>Safe search <input id="search-safe" type="number" min="0" max="2" value="'+esc(cfg["search.safe_search"]||"0")+'" /></label></div>'+
+       '<button data-action="save-search">Save Search configuration</button></div>'+
+       '<div class="card"><strong>Recent operations</strong><pre>'+esc(JSON.stringify(rows,null,2))+'</pre></div>';
+      return;
+   }
+   if(tab==="queue"){
+      app.innerHTML='<div class="card"><strong>Queue / System</strong><pre>'+esc(JSON.stringify(rows,null,2))+'</pre><div class="muted">Maintenance controls are server-side configuration and remain protected by RBAC.</div></div>';
+      return;
+   }
    if(tab==="config"){
       app.innerHTML='<div class="card">'+rows.map(r=>'<div class="card"><strong>'+esc(r.config_key)+'</strong><pre>'+esc(r.config_value)+'</pre><button data-action="edit-config" data-key="'+esc(r.config_key)+'">Edit</button></div>').join('')+'</div>';
       return;
@@ -180,6 +198,19 @@ async function refundOrder(id){
  await api("payments/"+encodeURIComponent(id)+"/refund",{method:"POST"});
  await render("payments");
 }
+async function saveSearch(){
+ const body={
+   "search.enabled":document.getElementById("search-enabled").checked,
+   "search.primary_url":document.getElementById("search-primary").value,
+   "search.fallback_url":document.getElementById("search-fallback").value,
+   "search.language":document.getElementById("search-language").value,
+   "search.categories":document.getElementById("search-categories").value,
+   "search.time_range":document.getElementById("search-time").value,
+   "search.safe_search":Number(document.getElementById("search-safe").value||"0")
+ };
+ await api("search",{method:"PUT",body:JSON.stringify(body)});
+ await render("search");
+}
 async function editConfig(key){
  const value=prompt("New value");
  if(value===null) return;
@@ -212,6 +243,7 @@ app.addEventListener("click",async(event)=>{
   if(action==="edit-plan") return editPlan(id);
   if(action==="refund") return refundOrder(id);
   if(action==="edit-config") return editConfig(target.dataset.key);
+  if(action==="save-search") return saveSearch();
  }catch(e){app.innerHTML='<div class="card"><strong>Ошибка</strong><pre>'+esc(e.message)+'</pre></div>';}
 });
 tabs.forEach(tab=>{const b=document.createElement("button");b.className="tab";b.textContent=tab;b.onclick=()=>render(tab);nav.appendChild(b);});
