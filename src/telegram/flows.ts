@@ -50,7 +50,7 @@ export async function handleStartCommand(
     }
     await sendTelegramMessage(botToken, chatId, t(locale, "start.greeting"));
     await new Promise((resolve) => setTimeout(resolve, 200));
-    const mainMenu = await sendTelegramMessage(botToken, chatId, "", { reply_markup: mainMenuKeyboard(false, locale) });
+    const mainMenu = await sendTelegramMessage(botToken, chatId, t(locale, "menu.title"), { reply_markup: mainMenuKeyboard(false, locale) });
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.mainMenuMessageId = mainMenu.message_id;
     await setUiPreferences(env.DB, userId, prefs);
