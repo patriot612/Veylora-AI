@@ -66,9 +66,10 @@ export async function processDocumentUploadJob(
   message: { operationId: string; userId: string; metadata?: Record<string, unknown> },
   deps: { db: D1Database; botToken: string; now: () => string; fetchImpl?: typeof fetch },
 ): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string }> {
-  const operation = await deps.db.prepare("SELECT status, temporary_result_ref FROM operations WHERE id=?1 AND user_id=?2")
-    .bind(message.operationId, message.userId).first<{ status: string; temporary_result_ref: string | null }>();
+  const operation = await deps.db.prepare("SELECT status, temporary_result_ref, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
+    .bind(message.operationId, message.userId).first<{ status: string; temporary_result_ref: string | null; telegram_delivery_status: string }>();
   if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) return { ok: true };
+  if (operation.telegram_delivery_status === "sent" && operation.temporary_result_ref) return { ok: true };
 
   const existingSessionId = operation.temporary_result_ref ?? null;
   const fileId = stringValue(message.metadata?.fileId);
