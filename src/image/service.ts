@@ -141,7 +141,7 @@ export async function processImageJob(message: {
       result = generation;
       if (generation.url) {
         await deps.db
-          .prepare("UPDATE operations SET temporary_result_ref = ?3, telegram_delivery_status='pending' WHERE id=?1 AND user_id=?2")
+          .prepare("UPDATE operations SET temporary_result_ref = ?1, telegram_delivery_status='pending' WHERE id=?2 AND user_id=?3")
           .bind(generation.url, message.operationId, message.userId)
           .run();
       }
