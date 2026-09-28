@@ -18,7 +18,7 @@ async function seedSearchUser(points = 50, cost = 5) {
   await env.DB.prepare("INSERT INTO providers (id,name,adapter_type,endpoint,enabled,created_at,updated_at) VALUES (?1,?2,'test','https://provider.test/v1',1,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(providerId, `Search Provider ${n}`).run();
   await env.DB.prepare("INSERT INTO credentials (id,provider_id,name,encrypted_secret,enabled,created_at,updated_at) VALUES (?1,?2,'Search',?3,1,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(credentialId, providerId, await encryptCredentialSecret("secret", key)).run();
   await env.DB.prepare("INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) VALUES (?1,'family_gpt',?2,?3,'search-model','Search Editor','search',?4,0,8000,1000,'{}',1,'{}','2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(modelId, providerId, credentialId, cost).run();
-  await env.DB.prepare("UPDATE system_config SET value = ?2, updated_at = ?3 WHERE key = 'search_editor_model_id'").bind(modelId, modelId, "2026-09-28T12:00:00Z").run();
+  await env.DB.prepare("INSERT OR REPLACE INTO system_config (config_key, config_value, updated_at) VALUES ('search_editor_model_id', ?1, ?2)").bind(modelId, "2026-09-28T12:00:00Z").run();
   return { userId, modelId };
 }
 
