@@ -442,7 +442,7 @@ async function search(env: Env, request?: Request, session?: AdminSession) {
     const body = await request.json<Record<string, unknown>>();
     const updates: Array<[string, string]> = [];
     for (const [key, value] of Object.entries(body)) {
-      if (!["search.primary_url", "search.fallback_url", "search.enabled", "search.max_query_chars"].includes(key)) continue;
+      if (!["search.primary_url", "search.fallback_url", "search.enabled", "search.max_query_chars", "search.language", "search.categories", "search.time_range", "search.safe_search"].includes(key)) continue;
       const normalized = typeof value === "boolean" ? (value ? "1" : "0") : String(value ?? "");
       if (normalized.length > 2048) return Response.json({ error: "search_config_too_large" }, { status: 413, headers: noStore() });
       updates.push([key, normalized]);
