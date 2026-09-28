@@ -51,7 +51,7 @@ export async function settleReservation(db: D1Database, operationId: string, now
   return (result[0].meta.changes ?? 0) === 1 && (result[1].meta.changes ?? 0) === 1;
 }
 
-export async function releaseReservation(db: D1Database, operationId: string, now: string): Promise<boolean> {
+export async function releaseReservation(db: D1Database, operationId: string, now: string, terminalStatus: 'failed' | 'timeout' = 'failed'): Promise<boolean> {
   const current = await db.prepare('SELECT o.user_id, r.daily_amount, r.bonus_amount, r.status FROM point_reservations r JOIN operations o ON o.id = r.operation_id WHERE r.operation_id = ?1').bind(operationId).first<{ user_id: string; daily_amount: number; bonus_amount: number; status: string }>();
   if (!current) return false;
   if (current.status === 'released') return true;
@@ -59,7 +59,7 @@ export async function releaseReservation(db: D1Database, operationId: string, no
   const statements: D1PreparedStatement[] = [
     db.prepare(`UPDATE point_reservations SET status = 'released', settled_at = ?2 WHERE operation_id = ?1 AND status = 'reserved' AND EXISTS (SELECT 1 FROM operations WHERE id = ?1 AND status IN ('reserved', 'processing', 'delivering', 'queued'))`).bind(operationId, now),
     db.prepare(`UPDATE users SET daily_points_remaining = daily_points_remaining + ?2, bonus_points = bonus_points + ?3, updated_at = ?4 WHERE id = ?1 AND EXISTS (SELECT 1 FROM point_reservations WHERE operation_id = ?5 AND status = 'released')`).bind(current.user_id, current.daily_amount, current.bonus_amount, now, operationId),
-    db.prepare(`UPDATE operations SET status = 'failed', finished_at = ?2 WHERE id = ?1 AND status IN ('reserved', 'processing', 'delivering', 'queued') AND EXISTS (SELECT 1 FROM point_reservations WHERE operation_id = ?1 AND status = 'released')`).bind(operationId, now),
+    db.prepare(`UPDATE operations SET status = ?2, finished_at = ?3 WHERE id = ?1 AND status IN ('reserved', 'processing', 'delivering', 'queued') AND EXISTS (SELECT 1 FROM point_reservations WHERE operation_id = ?1 AND status = 'released')`).bind(operationId, terminalStatus, now),
   ];
   if (current.daily_amount > 0) statements.push(db.prepare(`INSERT INTO point_ledger (id, user_id, operation_id, source, entry_type, amount, created_at) SELECT ?1, ?2, ?3, 'daily', 'release', ?4, ?5 WHERE EXISTS (SELECT 1 FROM point_reservations WHERE operation_id = ?3 AND status = 'released')`).bind(crypto.randomUUID(), current.user_id, operationId, current.daily_amount, now));
   if (current.bonus_amount > 0) statements.push(db.prepare(`INSERT INTO point_ledger (id, user_id, operation_id, source, entry_type, amount, created_at) SELECT ?1, ?2, ?3, 'bonus', 'release', ?4, ?5 WHERE EXISTS (SELECT 1 FROM point_reservations WHERE operation_id = ?3 AND status = 'released')`).bind(crypto.randomUUID(), current.user_id, operationId, current.bonus_amount, now));
