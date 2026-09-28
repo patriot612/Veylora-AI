@@ -240,9 +240,11 @@ describe("heavy queue consumer", () => {
   it("captures a delivered job instead of releasing points when it reaches DLQ", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 13);
     const operationId = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,telegram_delivery_status,created_at) VALUES (?1,?2,'image','delivering',?3,13,'sent','2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
-    await env.DB.prepare("INSERT INTO point_reservations (id,operation_id,daily_amount,bonus_amount,status,created_at) VALUES (?1,?2,13,0,'reserved','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId).run();
-    const message = fakeMessage({ version: 1, operationId, userId, jobType: "image", enqueuedAt: "2026-09-28T12:00:00Z" });
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,13,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+    const queue = fakeQueue();
+    await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 13, now: "2026-09-28T12:00:00Z" });
+    await env.DB.prepare("UPDATE operations SET status='delivering', telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(operationId, userId).run();
+    const message = fakeMessage(queue.sent[0]);
     const batch = { queue: "veylora-ai-jobs-dlq", messages: [message] } as unknown as MessageBatch<unknown>;
 
     await processDeadLetterBatch(batch, env.DB, () => "2026-09-28T12:02:00Z");
