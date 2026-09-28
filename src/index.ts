@@ -9,6 +9,7 @@ import { classifyTelegramUpdate } from "./telegram/router";
 import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
+import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -39,12 +40,63 @@ export default {
           return jsonResponse({ ok: true, ignored: true });
         }
 
+        if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
+          const command = extractMessageText(update);
+          if (command === "/voice") {
+            if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing");
+            const mode = await enterVoiceMode(env.DB, user.id, now);
+            await sendTelegramMessage(
+              env.TELEGRAM_BOT_TOKEN,
+              envelope.chat_id,
+              mode.ok
+                ? "Voice Mode включён. Отправьте голосовое сообщение."
+                : "Voice Mode доступен только по активной подписке.",
+            );
+          }
+        }
+
         if (envelope.kind === "text" && typeof envelope.text === "string" && typeof envelope.chat_id === "number" && typeof envelope.message_id === "number") {
+          const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
+          if (activeMode?.active_mode === "voice") {
+            if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+            await handleVoiceTextWhileActive(env.DB, user.id, env.TELEGRAM_BOT_TOKEN, envelope.chat_id, env, env.TELEGRAM_BOT_TOKEN);
+          } else {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("telegram_chat_runtime_secrets_missing");
           const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
           const send = (text: string, options?: Parameters<typeof sendTelegramMessage>[3]) => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, text, options);
           const edit = (messageId: number, text: string, options?: Parameters<typeof editTelegramMessage>[4]) => editTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, messageId, text, options);
           await handleChatMessage({ db: env.DB, gateway, userId: user.id, text: envelope.text, telegramUpdateId: envelope.update_id, chatId: envelope.chat_id, messageId: envelope.message_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY, send, edit });
+          }
+        }
+
+        if (envelope.kind === "voice" && typeof envelope.chat_id === "number") {
+          const message = isRecord(update.message) ? update.message : null;
+          const voice = message && isRecord(message.voice) ? message.voice : null;
+          const fileId = voice && typeof voice.file_id === "string" ? voice.file_id : null;
+          if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing");
+          if (!fileId) throw new Error("voice_file_id_missing");
+          const result = await enqueueVoiceMessage({
+            db: env.DB,
+            queue: env.AI_JOBS,
+            userId: user.id,
+            fileId,
+            mimeType: voice && typeof voice.mime_type === "string" ? voice.mime_type : undefined,
+            duration: voice && typeof voice.duration === "number" ? voice.duration : undefined,
+            chatId: envelope.chat_id,
+            telegramUpdateId: envelope.update_id,
+            now,
+            credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
+          });
+          if ("error" in result) {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? "Voice Mode доступен только по активной подписке." : "Не удалось принять голосовое сообщение. Попробуйте ещё раз.");
+          } else {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "🎙️ Обрабатываю голосовое сообщение...");
+          }
+        }
+
+        if (envelope.kind === "callback" && envelope.callbackData === "voice_exit" && typeof envelope.chat_id === "number") {
+          await exitVoiceMode(env.DB, user.id, now);
+          if (env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Voice Mode отключён. Вы вернулись в обычный Chat.");
         }
 
         const commandText = extractMessageText(update);
@@ -87,7 +139,12 @@ export default {
           encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!,
           now: () => new Date().toISOString(),
         }),
-        voice: async () => ({ ok: false, retryable: false, code: "voice_handler_not_registered" }),
+        voice: async (message) => processVoiceJob(message, {
+          db: env.DB,
+          gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()),
+          botToken: env.TELEGRAM_BOT_TOKEN!,
+          now: () => new Date().toISOString(),
+        }),
         document: async () => ({ ok: false, retryable: false, code: "document_handler_not_registered" }),
       },
     });
