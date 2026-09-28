@@ -47,7 +47,7 @@ export async function listSelectableModels(
     contextWindow: row.context_window,
     maxOutputTokens: row.max_output_tokens,
     capabilities: parseJsonObject(row.capabilities),
-  })).filter((model) => !model.subscriptionOnly || plan !== null);
+  }));
 }
 
 export async function resolveModel(
