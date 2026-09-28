@@ -32,6 +32,8 @@ export async function enqueueVoiceMessage(input: {
 }): Promise<{ operationId: string } | { error: string }> {
   const plan = await getActivePlan(input.db, input.userId, input.now);
   if (!plan?.voiceEnabled) return { error: "subscription_required" };
+  const mode = await input.db.prepare("SELECT active_mode FROM users WHERE id=?1").bind(input.userId).first<{ active_mode: string }>();
+  if (mode?.active_mode !== "voice") return { error: "voice_mode_inactive" };
 
   const modelId = await getSystemConfig(input.db, "default_voice_model_id");
   if (!modelId) return { error: "voice_model_unavailable" };
@@ -138,8 +140,6 @@ export async function processVoiceJob(
 }
 
 export async function handleVoiceTextWhileActive(
-  db: D1Database,
-  userId: string,
   botToken: string,
   chatId: number,
   fetchImpl?: typeof fetch,
