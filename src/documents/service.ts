@@ -1,3 +1,5 @@
+type DocumentFileType = "pdf" | "docx" | "txt";
+
 import { getSystemConfig, getSystemConfigInt } from "../config";
 import { createOperation } from "../operations/service";
 import { enqueueHeavyJob } from "../queue/producer";
