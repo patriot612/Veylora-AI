@@ -130,6 +130,12 @@ describe("Admin Mini App HTTP surface", () => {
     });
     expect(bonus.status).toBe(200);
 
+    const modelList = await worker.default.fetch("https://example.test/admin/api/models", { headers });
+    expect(modelList.status).toBe(200);
+    const modelListBody = await modelList.json() as { rows?: Array<Record<string, unknown>> };
+    expect(modelListBody.rows?.[0]).not.toHaveProperty("provider_name");
+    expect(modelListBody.rows?.[0]).not.toHaveProperty("credential_name");
+
     const modelUpdate = await worker.default.fetch(`https://example.test/admin/api/models/${modelId}`, {
       method: "PUT",
       headers: { ...headers, "content-type": "application/json" },
