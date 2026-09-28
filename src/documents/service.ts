@@ -160,7 +160,11 @@ export async function answerDocumentQuestion(input: { db: D1Database; gateway: A
       timeoutMs: 120_000,
     });
     if (!answer.text.trim()) throw new Error("document_empty_answer");
-    if (!(await settleReservation(input.db, operation.operation.id, new Date().toISOString()))) throw new Error("document_settlement_failed");
+    const transitioned = await input.db
+      .prepare("UPDATE operations SET status='delivering', telegram_delivery_status='pending', temporary_result_ref=?2 WHERE id=?1 AND user_id=?3 AND status='processing'")
+      .bind(operation.operation.id, answer.text, input.userId)
+      .run();
+    if ((transitioned.meta.changes ?? 0) !== 1) throw new Error("document_delivery_state_conflict");
     const idleSeconds = await getSystemConfigInt(input.db, "limits.document_session_idle_seconds", 7200);
     await input.db.prepare("UPDATE document_sessions SET last_activity_at=?2, expires_at=?3 WHERE id=?1 AND user_id=?4").bind(session.id, input.now, new Date(Date.parse(input.now) + idleSeconds * 1000).toISOString(), input.userId).run();
     return { answer: answer.text, operationId: operation.operation.id };
@@ -168,6 +172,40 @@ export async function answerDocumentQuestion(input: { db: D1Database; gateway: A
     await releaseReservation(input.db, operation.operation.id, new Date().toISOString(), "failed", error instanceof Error ? error.message : "document_question_failed");
     return { error: error instanceof Error ? error.message : "document_question_failed" };
   }
+}
+
+
+
+export async function completeDocumentQuestionDelivery(
+  db: D1Database,
+  userId: string,
+  operationId: string,
+  now: string,
+): Promise<boolean> {
+  const marked = await db
+    .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2 AND status='delivering' AND telegram_delivery_status='pending'")
+    .bind(operationId, userId)
+    .run();
+
+  if ((marked.meta.changes ?? 0) === 0) {
+    const current = await db
+      .prepare("SELECT status, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
+      .bind(operationId, userId)
+      .first<{ status: string; telegram_delivery_status: string }>();
+    if (current?.status === "succeeded") return true;
+    if (!current || current.telegram_delivery_status !== "sent") return false;
+  }
+
+  return settleReservation(db, operationId, now);
+}
+
+export async function releaseDocumentQuestionDelivery(
+  db: D1Database,
+  operationId: string,
+  now: string,
+  errorCode = "telegram_document_question_delivery_failed",
+): Promise<boolean> {
+  return releaseReservation(db, operationId, now, "failed", errorCode);
 }
 
 function inferFileType(mimeType?: string, fileName?: string): DocumentFileType | null {
