@@ -296,3 +296,24 @@ export async function refundTelegramStarPayment(
   );
   return true;
 }
+
+
+export async function answerTelegramCallbackQuery(
+  botToken: string,
+  callbackQueryId: string,
+  text?: string,
+  showAlert = false,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  await telegramApi(
+    botToken,
+    "answerCallbackQuery",
+    {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text } : {}),
+      ...(showAlert ? { show_alert: true } : {}),
+    },
+    fetchImpl,
+  );
+  return true;
+}
