@@ -116,6 +116,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
   }
 
   let temporaryMessageId: number | undefined;
+  let telegramDelivered = false;
 
   try {
     const reservation = await reservePoints(input.db, input.userId, operation.operation.id, model.pointsCost, input.now);
@@ -166,6 +167,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
       .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2 AND status='delivering' AND telegram_delivery_status='not_started'")
       .bind(operation.operation.id, input.userId)
       .run();
+    telegramDelivered = true;
 
     await persistTurn(input.db, conversation.id, model.id, conversation.role_id, text, answer.text, input.now, input.userId);
     const settled = await settleReservation(input.db, operation.operation.id, new Date().toISOString());
@@ -184,22 +186,24 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
       answer: answer.text,
     };
   } catch (error) {
-    await releaseReservation(input.db, operation.operation.id, new Date().toISOString()).catch(() => false);
-    await transitionOperation(input.db, {
-      operationId: operation.operation.id,
-      userId: input.userId,
-      to: "failed",
-      now: new Date().toISOString(),
-      errorCode: error instanceof Error ? error.message : "chat_failed",
-    }).catch(() => false);
+    if (!telegramDelivered) {
+      await releaseReservation(input.db, operation.operation.id, new Date().toISOString()).catch(() => false);
+      await transitionOperation(input.db, {
+        operationId: operation.operation.id,
+        userId: input.userId,
+        to: "failed",
+        now: new Date().toISOString(),
+        errorCode: error instanceof Error ? error.message : "chat_failed",
+      }).catch(() => false);
 
-    if (temporaryMessageId) {
-      await safeEdit(input.edit, temporaryMessageId, FAILURE_MESSAGE + "\n[Повторить]");
-    } else {
-      await safeSend(input.send, FAILURE_MESSAGE + "\n[Повторить]");
+      if (temporaryMessageId) {
+        await safeEdit(input.edit, temporaryMessageId, FAILURE_MESSAGE + "\n[Повторить]");
+      } else {
+        await safeSend(input.send, FAILURE_MESSAGE + "\n[Повторить]");
+      }
     }
 
-    return { kind: "failed", operationId: operation.operation.id, retryable: true, temporaryMessageId };
+    return { kind: "failed", operationId: operation.operation.id, retryable: !telegramDelivered, temporaryMessageId };
   } finally {
     await releaseActiveChatOperation(input.db, input.userId, operation.operation.id).catch(() => false);
   }
