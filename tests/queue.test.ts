@@ -221,6 +221,39 @@ describe("heavy queue consumer", () => {
     expect(message.acked).toBe(true);
   });
 
+  it("cleans up failed document upload sessions before dead-letter release", async () => {
+    const userId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id,telegram_user_id,daily_billing_day,daily_points_remaining,active_mode,active_document_session_id,created_at,updated_at) VALUES (?1,?2,'2026-09-28',48,'documents',?3,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(userId, 981000001, sessionId),
+      env.DB.prepare("INSERT INTO operations (id,user_id,type,status,points_cost,telegram_delivery_status,temporary_result_ref,created_at) VALUES (?1,?2,'document','queued',2,'pending',?3,'2026-09-28T12:00:00Z')").bind(operationId, userId, sessionId),
+      env.DB.prepare("INSERT INTO point_reservations (id,operation_id,daily_amount,bonus_amount,status,created_at) VALUES (?1,?2,2,0,'reserved','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId),
+      env.DB.prepare("INSERT INTO queue_jobs (id,operation_id,queue_type,status,attempt,created_at,updated_at) VALUES (?1,?2,'document','processing',3,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId),
+      env.DB.prepare("INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,'txt',20,'2026-09-29T12:00:00Z','2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(sessionId, userId),
+      env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'temporary document','2026-09-29T12:00:00Z')").bind(crypto.randomUUID(), sessionId),
+    ]);
+    const message = fakeMessage({ version: 1, operationId, userId, jobType: "document", enqueuedAt: "2026-09-28T12:00:00Z" });
+    const batch = { queue: "veylora-ai-jobs-dlq", messages: [message] } as unknown as MessageBatch<unknown>;
+
+    await processDeadLetterBatch(batch, env.DB, () => "2026-09-28T12:03:00Z");
+
+    const user = await env.DB.prepare("SELECT daily_points_remaining,active_document_session_id,active_mode FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number;active_document_session_id:string|null;active_mode:string}>();
+    const session = await env.DB.prepare("SELECT id FROM document_sessions WHERE id=?1").bind(sessionId).first<{id:string}>();
+    const chunks = await env.DB.prepare("SELECT COUNT(*) AS count FROM document_chunks WHERE session_id=?1").bind(sessionId).first<{count:number}>();
+    const operation = await env.DB.prepare("SELECT status,error_code,temporary_result_ref FROM operations WHERE id=?1").bind(operationId).first<{status:string;error_code:string|null;temporary_result_ref:string|null}>();
+
+    expect(user?.daily_points_remaining).toBe(50);
+    expect(user?.active_document_session_id).toBeNull();
+    expect(user?.active_mode).toBe("chat");
+    expect(session).toBeNull();
+    expect(chunks?.count).toBe(0);
+    expect(operation?.status).toBe("failed");
+    expect(operation?.error_code).toBe("queue_dead_lettered");
+    expect(operation?.temporary_result_ref).toBeNull();
+    expect(message.acked).toBe(true);
+  });
+
   it("terminally fails dead-lettered jobs and releases points", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 8);
     const operationId = crypto.randomUUID();
