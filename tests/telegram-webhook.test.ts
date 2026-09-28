@@ -1,6 +1,8 @@
-import { env, exports } from "cloudflare:workers";
+import { exports as workerExports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { env as typedEnv } from "./test-env";
+import { env } from "./test-env";
+
+const worker = workerExports as unknown as { default: ExportedHandler<Env> };
 
 describe("Telegram webhook integration", () => {
   it("claims an update once and returns duplicate for a repeated update_id", async () => {
@@ -18,14 +20,14 @@ describe("Telegram webhook integration", () => {
       "X-Telegram-Bot-Api-Secret-Token": "test-secret",
     };
 
-    const first = await exports.default.fetch("https://example.test/telegram/webhook", {
+    const first = await worker.default.fetch("https://example.test/telegram/webhook", {
       method: "POST",
       headers,
       body,
     });
     const firstBody = (await first.json()) as { ok?: boolean; duplicate?: boolean };
 
-    const second = await exports.default.fetch("https://example.test/telegram/webhook", {
+    const second = await worker.default.fetch("https://example.test/telegram/webhook", {
       method: "POST",
       headers,
       body,
@@ -48,11 +50,11 @@ describe("Telegram webhook integration", () => {
 
     expect(row?.count).toBe(1);
     expect(user?.telegram_user_id).toBe(987654321);
-    expect(typedEnv.TELEGRAM_WEBHOOK_SECRET).toBe("test-secret");
+    expect(env.TELEGRAM_WEBHOOK_SECRET).toBe("test-secret");
   });
 
   it("rejects webhook requests without the configured secret", async () => {
-    const response = await exports.default.fetch("https://example.test/telegram/webhook", {
+    const response = await worker.default.fetch("https://example.test/telegram/webhook", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ update_id: 5002 }),
