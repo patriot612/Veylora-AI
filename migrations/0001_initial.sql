@@ -29,7 +29,7 @@ CREATE TABLE plans (
   id TEXT PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+  duration_days INTEGER NOT NULL CHECK (duration_days >= 0),
   daily_points INTEGER NOT NULL CHECK (daily_points >= 0),
   retention_hours INTEGER NOT NULL CHECK (retention_hours > 0),
   voice_enabled INTEGER NOT NULL DEFAULT 0 CHECK (voice_enabled IN (0,1)),
