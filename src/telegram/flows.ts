@@ -14,6 +14,17 @@ import { createDefaultProviderAdapters } from "../providers/factory";
 
 type UserPrefs = Record<string, unknown>;
 
+function uniqueFamilies(models: Array<{ familyId: string; familyName: string }>): Array<{ id: string; name: string }> {
+  const seen = new Set<string>();
+  const families: Array<{ id: string; name: string }> = [];
+  for (const model of models) {
+    if (seen.has(model.familyId)) continue;
+    seen.add(model.familyId);
+    families.push({ id: model.familyId, name: model.familyName });
+  }
+  return families;
+}
+
 export async function handleStartCommand(
   env: Env,
   requestUrl: string,
@@ -92,12 +103,13 @@ export async function handleTelegramCallback(
     await setMode(env.DB, userId, "image", now);
     const models = await listSelectableModels(env.DB, { userId, type: "image", now });
     const templates = await env.DB.prepare("SELECT id,name,extra_points_cost FROM image_templates WHERE enabled=1 ORDER BY name LIMIT 12").all<{id:string;name:string;extra_points_cost:number}>();
-    await sendTelegramMessage(botToken, chatId, "🎨 Изображения\nВыберите модель, параметры или шаблон, затем отправьте описание.", {
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.screen"), {
       reply_markup: {
         inline_keyboard: [
           ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "image_model:" + model.id }]),
           [{ text: "Размер 1024×1024", callback_data: "image_size:1024x1024" }, { text: "1536×1024", callback_data: "image_size:1536x1024" }],
           [{ text: "Standard", callback_data: "image_quality:standard" }, { text: "HD", callback_data: "image_quality:hd" }],
+          [{ text: "PNG", callback_data: "image_format:png" }, { text: "WEBP", callback_data: "image_format:webp" }, { text: "JPG", callback_data: "image_format:jpg" }],
           ...(templates.results ?? []).slice(0, 6).map((template: { id: string; name: string; extra_points_cost: number }) => [{ text: "📐 " + template.name + " +" + template.extra_points_cost + " б.", callback_data: "image_template:" + template.id }]),
           [{ text: "← В меню", callback_data: "menu:chat" }],
         ],
@@ -163,13 +175,36 @@ export async function handleTelegramCallback(
     return true;
   }
 
+  if (data.startsWith("image_format:")) {
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.imageFormat = data.slice("image_format:".length);
+    await setUiPreferences(env.DB, userId, prefs);
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.formatSaved"));
+    return true;
+  }
+
   if (data === "menu:model") {
     const models = await listSelectableModels(env.DB, { userId, type: "chat", now });
-    await sendTelegramMessage(botToken, chatId, "📚 Сменить модель", {
+    const families = uniqueFamilies(models);
+    await sendTelegramMessage(botToken, chatId, t(locale, "models.selectFamily"), {
       reply_markup: {
         inline_keyboard: [
-          ...models.slice(0, 10).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "model:" + model.id }]),
-          [{ text: "← В меню", callback_data: "menu:chat" }],
+          ...families.map((family) => [{ text: family.name, callback_data: "model_family:" + family.id }]),
+          [{ text: t(locale, "common.toChat"), callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("model_family:")) {
+    const familyId = data.slice("model_family:".length);
+    const models = (await listSelectableModels(env.DB, { userId, type: "chat", now })).filter((model) => model.familyId === familyId);
+    await sendTelegramMessage(botToken, chatId, models.length ? "📚 " + models[0].familyName : t(locale, "models.selectFamily"), {
+      reply_markup: {
+        inline_keyboard: [
+          ...models.map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "model:" + model.id }]),
+          [{ text: t(locale, "models.backToFamilies"), callback_data: "menu:model" }],
         ],
       },
     });
@@ -326,11 +361,26 @@ export async function handleTelegramCallback(
   if (data === "tool:search") {
     await setMode(env.DB, userId, "search", now);
     const models = await listSelectableModels(env.DB, { userId, type: "search", now });
-    await sendTelegramMessage(botToken, chatId, "🔎 Search Mode\nВыберите модель и затем отправьте запрос.", {
+    const families = uniqueFamilies(models);
+    await sendTelegramMessage(botToken, chatId, "🔎 Search Mode\n" + t(locale, "models.selectFamily"), {
       reply_markup: {
         inline_keyboard: [
-          ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "search_model:" + model.id }]),
-          [{ text: "← В меню", callback_data: "menu:chat" }],
+          ...families.map((family) => [{ text: family.name, callback_data: "search_family:" + family.id }]),
+          [{ text: t(locale, "common.toChat"), callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("search_family:")) {
+    const familyId = data.slice("search_family:".length);
+    const models = (await listSelectableModels(env.DB, { userId, type: "search", now })).filter((model) => model.familyId === familyId);
+    await sendTelegramMessage(botToken, chatId, "🔎 " + (models[0]?.familyName ?? t(locale, "models.selectFamily")), {
+      reply_markup: {
+        inline_keyboard: [
+          ...models.map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "search_model:" + model.id }]),
+          [{ text: t(locale, "models.backToFamilies"), callback_data: "tool:search" }],
         ],
       },
     });
@@ -356,13 +406,30 @@ export async function handleTelegramCallback(
 
   if (data === "tool:documents") {
     await enterDocumentsMode(env.DB, userId, now);
-    await sendTelegramMessage(botToken, chatId, t(locale, "documents.enabled"));
+    const uploadCost = await getSystemConfigInt(env.DB, "cost.document_upload", 2);
+    const questionCost = await getSystemConfigInt(env.DB, "cost.document_question", 3);
+    const maxBytes = await getSystemConfigInt(env.DB, "limits.document_bytes", 10 * 1024 * 1024);
+    const maxPages = await getSystemConfigInt(env.DB, "limits.document_pdf_pages", 50);
+    const maxChars = await getSystemConfigInt(env.DB, "limits.document_extracted_chars", 25000);
+    await sendTelegramMessage(botToken, chatId, t(locale, "documents.screen", {
+      uploadCost,
+      questionCost,
+      sizeMb: Math.round(maxBytes / (1024 * 1024)),
+      pages: maxPages,
+      chars: maxChars,
+    }));
     return true;
   }
 
   if (data === "tool:voice") {
     const mode = await enterVoiceMode(env.DB, userId, now);
-    await sendTelegramMessage(botToken, chatId, mode.ok ? "🎙 Voice Mode включён. Отправьте голосовое сообщение." : "Voice Mode доступен только по активной подписке.");
+    if (!mode.ok) {
+      await sendTelegramMessage(botToken, chatId, t(locale, "voice.required"));
+      return true;
+    }
+    const models = await listSelectableModels(env.DB, { userId, type: "voice", now });
+    const model = models[0];
+    await sendTelegramMessage(botToken, chatId, model ? t(locale, "voice.screen", { model: model.displayName, cost: model.pointsCost }) : t(locale, "voice.enabled"));
     return true;
   }
 
