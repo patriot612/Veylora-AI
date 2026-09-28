@@ -6,4 +6,5 @@ interface Env {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
   CREDENTIAL_ENCRYPTION_KEY?: string;
+  SEARXNG_URL?: string;
 }
