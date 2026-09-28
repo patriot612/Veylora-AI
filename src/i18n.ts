@@ -10,7 +10,7 @@ const messages: Record<Locale, Record<string, Message>> = {
   ru: {
     "common.back": "← Назад",
     "menu.chat": "💬 Чат", "menu.newDialog": "➕ Новый диалог", "menu.image": "🎨 Изображения", "menu.model": "🤖 Сменить модель", "menu.dialogs": "📖 Мои диалоги", "menu.tools": "🧰 Инструменты", "menu.account": "👤 Аккаунт", "menu.search": "🔎 Поиск", "menu.documents": "📄 Документы", "menu.roles": "🎭 Роли",
-    "account.plans": "Подписка и баллы", "account.orders": "Мои заказы", "language.self": "Русский",
+    "account.plans": "Подписка и баллы", "account.orders": "Мои заказы", "language.self": "Русский", "dialogs.messages": "📖 Сообщения", "dialogs.history": "📚 Вся история", "dialogs.continue": "▶ Продолжить", "dialogs.archive": "📁 В архив", "dialogs.rename": "✏️ Переименовать", "dialogs.restore": "▶ Восстановить / продолжить", "orders.none": "Заказов пока нет.", "plans.title": "Тарифы", "plans.pay": "Оплатить", "plans.details": "Срок: {days} дней\nДневные баллы: {points}\nХранение диалогов: {retention} ч\nVoice: {voice}",
     "common.toChat": "💬 В чат",
     "common.toAccount": "← К аккаунту",
     "common.help": "❓ Помощь",
@@ -52,7 +52,7 @@ const messages: Record<Locale, Record<string, Message>> = {
   en: {
     "common.back": "← Back",
     "menu.chat": "💬 Chat", "menu.newDialog": "➕ Neuer Dialog", "menu.newDialog": "➕ Nouveau dialogue", "menu.newDialog": "➕ Yangi dialog", "menu.newDialog": "➕ New dialog", "menu.image": "🎨 Images", "menu.model": "🤖 Change model", "menu.dialogs": "📖 My dialogs", "menu.tools": "🧰 Tools", "menu.account": "👤 Account", "menu.search": "🔎 Search", "menu.documents": "📄 Documents", "menu.roles": "🎭 Roles",
-    "account.plans": "Plans & points", "account.orders": "My orders", "language.self": "English",
+    "account.plans": "Plans & points", "account.orders": "My orders", "language.self": "English", "dialogs.messages": "📖 Messages", "dialogs.history": "📚 Full history", "dialogs.continue": "▶ Continue", "dialogs.archive": "📁 Archive", "dialogs.rename": "✏️ Rename", "dialogs.restore": "▶ Restore / continue", "orders.none": "No orders yet.", "plans.title": "Plans", "plans.pay": "Pay", "plans.details": "Term: {days} days\nDaily points: {points}\nConversation retention: {retention} h\nVoice: {voice}",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Account",
     "common.help": "❓ Help",
@@ -94,7 +94,7 @@ const messages: Record<Locale, Record<string, Message>> = {
   uz: {
     "common.back": "← Orqaga",
     "menu.chat": "💬 Chat", "menu.image": "🎨 Rasmlar", "menu.model": "🤖 Modelni almashtirish", "menu.dialogs": "📖 Muloqotlarim", "menu.tools": "🧰 Asboblar", "menu.account": "👤 Akkaunt", "menu.search": "🔎 Qidiruv", "menu.documents": "📄 Hujjatlar", "menu.roles": "🎭 Rollar",
-    "account.plans": "Obuna va ballar", "account.orders": "Buyurtmalarim", "language.self": "O'zbek",
+    "account.plans": "Obuna va ballar", "account.orders": "Buyurtmalarim", "language.self": "O'zbek", "dialogs.messages": "📖 Xabarlar", "dialogs.history": "📚 To‘liq tarix", "dialogs.continue": "▶ Davom etish", "dialogs.archive": "📁 Arxiv", "dialogs.rename": "✏️ Nomini o‘zgartirish", "dialogs.restore": "▶ Tiklash / davom etish", "orders.none": "Buyurtmalar yo‘q.", "plans.title": "Tariflar", "plans.pay": "To‘lash", "plans.details": "Muddat: {days} kun\nKunlik ballar: {points}\nMuloqot saqlanishi: {retention} soat\nVoice: {voice}",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Akkaunt",
     "common.help": "❓ Yordam",
@@ -136,7 +136,7 @@ const messages: Record<Locale, Record<string, Message>> = {
   fr: {
     "common.back": "← Retour",
     "menu.chat": "💬 Chat", "menu.image": "🎨 Images", "menu.model": "🤖 Changer de modèle", "menu.dialogs": "📖 Mes dialogues", "menu.tools": "🧰 Outils", "menu.account": "👤 Compte", "menu.search": "🔎 Recherche", "menu.documents": "📄 Documents", "menu.roles": "🎭 Rôles",
-    "account.plans": "Abonnement et points", "account.orders": "Mes commandes", "language.self": "Français",
+    "account.plans": "Abonnement et points", "account.orders": "Mes commandes", "language.self": "Français", "dialogs.messages": "📖 Messages", "dialogs.history": "📚 Historique complet", "dialogs.continue": "▶ Continuer", "dialogs.archive": "📁 Archiver", "dialogs.rename": "✏️ Renommer", "dialogs.restore": "▶ Restaurer / continuer", "orders.none": "Aucune commande.", "plans.title": "Tarifs", "plans.pay": "Payer", "plans.details": "Durée : {days} jours\nPoints quotidiens : {points}\nConservation : {retention} h\nVoice : {voice}",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Compte",
     "common.help": "❓ Aide",
@@ -178,7 +178,7 @@ const messages: Record<Locale, Record<string, Message>> = {
   de: {
     "common.back": "← Zurück",
     "menu.chat": "💬 Chat", "menu.image": "🎨 Bilder", "menu.model": "🤖 Modell wechseln", "menu.dialogs": "📖 Meine Dialoge", "menu.tools": "🧰 Tools", "menu.account": "👤 Konto", "menu.search": "🔎 Suche", "menu.documents": "📄 Dokumente", "menu.roles": "🎭 Rollen",
-    "account.plans": "Abo und Punkte", "account.orders": "Meine Bestellungen", "language.self": "Deutsch",
+    "account.plans": "Abo und Punkte", "account.orders": "Meine Bestellungen", "language.self": "Deutsch", "dialogs.messages": "📖 Nachrichten", "dialogs.history": "📚 Vollständige Historie", "dialogs.continue": "▶ Fortsetzen", "dialogs.archive": "📁 Archivieren", "dialogs.rename": "✏️ Umbenennen", "dialogs.restore": "▶ Wiederherstellen / fortsetzen", "orders.none": "Noch keine Bestellungen.", "plans.title": "Tarife", "plans.pay": "Bezahlen", "plans.details": "Laufzeit: {days} Tage\nTägliche Punkte: {points}\nAufbewahrung: {retention} Std.\nVoice: {voice}",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Konto",
     "common.help": "❓ Hilfe",
