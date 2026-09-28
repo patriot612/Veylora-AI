@@ -174,7 +174,7 @@ describe("Voice mode", () => {
       { operationId: opId, userId, metadata: { fileId: "voice-file", chatId: 123, mimeType: "audio/ogg" } },
       { db: env.DB, gateway, botToken: "bot-test", now: () => "2026-09-28T12:02:00Z", fetchImpl },
     );
-    expect(first).toEqual({ ok: false, retryable: true, code: "telegram_voice_delivery_retry" });
+    expect(first).toEqual({ ok: false, retryable: true, code: "telegram_voice_delivery_retry", retryAfterSeconds: 2 });
     expect(providerCalls).toBe(1);
   });
 });
