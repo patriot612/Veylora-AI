@@ -65,6 +65,70 @@ describe('D1 billing lifecycle', () => {
     expect(ledger?.count).toBe(2);
   });
 
+
+  it('handles concurrent reserve calls idempotently', async () => {
+    const userId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    await seedUser(userId, 50);
+    await seedOperation(operationId, userId);
+
+    const results = await Promise.all([
+      reservePoints(env.DB, userId, operationId, 20, '2026-09-28T12:00:00.000Z'),
+      reservePoints(env.DB, userId, operationId, 20, '2026-09-28T12:00:00.000Z'),
+    ]);
+
+    expect(results.filter((result) => result.ok).length).toBe(2);
+    const user = await env.DB.prepare('SELECT daily_points_remaining FROM users WHERE id=?1').bind(userId).first<{ daily_points_remaining:number }>();
+    const reservation = await env.DB.prepare('SELECT daily_amount, status FROM point_reservations WHERE operation_id=?1').bind(operationId).first<{ daily_amount:number; status:string }>();
+    expect(user?.daily_points_remaining).toBe(30);
+    expect(reservation?.daily_amount).toBe(20);
+    expect(reservation?.status).toBe('reserved');
+  });
+
+  it('handles concurrent settlement without duplicate capture', async () => {
+    const userId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    await seedUser(userId);
+    await seedOperation(operationId, userId);
+    expect((await reservePoints(env.DB, userId, operationId, 20, '2026-09-28T12:00:00.000Z')).ok).toBe(true);
+
+    const results = await Promise.all([
+      settleReservation(env.DB, operationId, '2026-09-28T12:01:00.000Z'),
+      settleReservation(env.DB, operationId, '2026-09-28T12:01:01.000Z'),
+    ]);
+
+    expect(results).toEqual([true, true]);
+    const operation = await env.DB.prepare('SELECT status FROM operations WHERE id=?1').bind(operationId).first<{status:string}>();
+    const ledger = await env.DB.prepare('SELECT source,entry_type,COUNT(*) AS count FROM point_ledger WHERE operation_id=?1 GROUP BY source,entry_type ORDER BY source,entry_type').bind(operationId).all<{source:string;entry_type:string;count:number}>();
+    expect(operation?.status).toBe('succeeded');
+    expect(ledger.results).toEqual([
+      { source: 'daily', entry_type: 'capture', count: 1 },
+      { source: 'daily', entry_type: 'reserve', count: 1 },
+    ]);
+  });
+
+  it('handles concurrent release without double-restoring points', async () => {
+    const userId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    await seedUser(userId);
+    await seedOperation(operationId, userId);
+    expect((await reservePoints(env.DB, userId, operationId, 20, '2026-09-28T12:00:00.000Z')).ok).toBe(true);
+
+    const results = await Promise.all([
+      releaseReservation(env.DB, operationId, '2026-09-28T12:01:00.000Z'),
+      releaseReservation(env.DB, operationId, '2026-09-28T12:01:01.000Z'),
+    ]);
+
+    expect(results).toEqual([true, true]);
+    const user = await env.DB.prepare('SELECT daily_points_remaining FROM users WHERE id=?1').bind(userId).first<{daily_points_remaining:number}>();
+    const ledger = await env.DB.prepare('SELECT source,entry_type,COUNT(*) AS count FROM point_ledger WHERE operation_id=?1 GROUP BY source,entry_type ORDER BY source,entry_type').bind(operationId).all<{source:string;entry_type:string;count:number}>();
+    expect(user?.daily_points_remaining).toBe(50);
+    expect(ledger.results).toEqual([
+      { source: 'daily', entry_type: 'release', count: 1 },
+      { source: 'daily', entry_type: 'reserve', count: 1 },
+    ]);
+  });
+
   it('resets at UTC+3 without carrying the previous balance', async () => {
     const userId = crypto.randomUUID();
     const operationId = crypto.randomUUID();
