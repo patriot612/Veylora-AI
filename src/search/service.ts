@@ -17,6 +17,7 @@ export type SearchServiceInput = {
 
 const MAX_QUERY_CHARS = 1000;
 const MAX_RESULTS = 8;
+const MAX_DISPLAYED_SOURCES = 5;
 const MAX_CONTENT_CHARS = 3500;
 const SEARCH_TIMEOUT_MS = 5 * 60 * 1000;
 const SEARXNG_TIMEOUT_MS = 45 * 1000;
@@ -71,7 +72,7 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
       .bind(operationId, input.userId, text)
       .run();
     if ((transitioned.meta.changes ?? 0) !== 1) throw new Error("search_delivery_state_conflict");
-    return { kind: "answered", operationId, text, sources: results };
+    return { kind: "answered", operationId, text, sources: results.slice(0, MAX_DISPLAYED_SOURCES) };
   } catch (error) {
     const code = error instanceof Error && error.name === "AbortError" ? "search_timeout" : error instanceof Error ? error.message : "search_failed";
     const now = new Date().toISOString();
@@ -150,6 +151,6 @@ function buildGroundedMessages(query: string, results: SearchResult[]) {
 }
 
 function appendSources(answer: string, results: SearchResult[]): string {
-  return `${answer}\n\nИсточники:\n${results.map((result, index) => `[${index + 1}] ${result.title}\n${result.url}`).join("\n")}`;
+  return `${answer}\n\nИсточники:\n${results.slice(0, MAX_DISPLAYED_SOURCES).map((result, index) => `[${index + 1}] ${result.title}\n${result.url}`).join("\n")}`;
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
