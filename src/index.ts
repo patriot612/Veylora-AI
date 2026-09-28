@@ -172,7 +172,7 @@ export default {
           else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "🎙️ Обрабатываю голосовое сообщение...");
         }
         if (envelope.kind === "callback" && typeof envelope.chat_id === "number") {
-          await handleTelegramCallback(env, request.url, user.id, user.telegramUserId, envelope.chat_id, envelope.callbackQueryId, envelope.callbackData ?? "", now);
+          await handleTelegramCallback(env, request.url, user.id, user.telegramUserId, envelope.chat_id, envelope.callbackQueryId, envelope.callbackData ?? "", now, envelope.message_id);
         }
         const commandText = extractMessageText(update);
         if (envelope.kind === "command" && commandText?.startsWith("/search") && typeof envelope.chat_id === "number") {
