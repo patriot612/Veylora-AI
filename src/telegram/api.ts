@@ -82,6 +82,21 @@ export async function sendTelegramMessage(
   );
 }
 
+export async function deleteTelegramMessage(
+  botToken: string,
+  chatId: number,
+  messageId: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  await telegramApi(
+    botToken,
+    "deleteMessage",
+    { chat_id: chatId, message_id: messageId },
+    fetchImpl,
+  );
+  return true;
+}
+
 export async function editTelegramMessage(
   botToken: string,
   chatId: number,
