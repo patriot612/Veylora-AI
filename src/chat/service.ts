@@ -253,23 +253,23 @@ async function buildContext(db: D1Database, conversationId: string, userId: stri
     "SELECT user_text, assistant_text FROM conversation_turns WHERE conversation_id = ?1 AND EXISTS (SELECT 1 FROM conversations WHERE id = ?1 AND user_id = ?2) ORDER BY created_at DESC LIMIT 99",
   ).bind(conversationId, userId).all<{ user_text: string; assistant_text: string }>();
 
-  const turns = [...(rows.results ?? [])].reverse();
   const messages: GatewayMessage[] = [];
   if (role?.system_prompt) messages.push({ role: "system", content: role.system_prompt });
 
   const reserve = Math.max(1024, Math.floor(contextWindow * 0.85));
+  const selected: Array<{ user_text: string; assistant_text: string }> = [];
   let used = 0;
-  for (const turn of turns) {
-    const pair = [
-      { role: "user" as const, content: turn.user_text },
-      { role: "assistant" as const, content: turn.assistant_text },
-    ];
-    const pairChars = pair[0].content.length + pair[1].content.length;
-    if (used + pairChars > reserve) continue;
-    messages.push(...pair);
+  for (const turn of rows.results ?? []) {
+    const pairChars = turn.user_text.length + turn.assistant_text.length;
+    if (pairChars > reserve && selected.length === 0) continue;
+    if (used + pairChars > reserve) break;
+    selected.push(turn);
     used += pairChars;
   }
 
+  for (const turn of selected.reverse()) {
+    messages.push({ role: "user", content: turn.user_text }, { role: "assistant", content: turn.assistant_text });
+  }
   return messages;
 }
 
