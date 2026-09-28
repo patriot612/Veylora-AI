@@ -125,6 +125,11 @@ describe("Telegram Stars payments", () => {
     expect(orders?.count).toBe(1);
     expect(payments?.count).toBe(1);
     expect(subscriptions?.count).toBe(1);
+    const audit = await env.DB.prepare("SELECT event_type,target_type,target_id,safe_metadata FROM audit_log WHERE actor_user_id=?1 AND event_type='payment.success' ORDER BY created_at DESC LIMIT 1").bind(userId).first<{event_type:string;target_type:string;target_id:string;safe_metadata:string}>();
+    expect(audit?.event_type).toBe("payment.success");
+    expect(audit?.target_type).toBe("order");
+    expect(audit?.target_id).toBe(orderId);
+    expect(audit?.safe_metadata).toContain("telegram_stars");
   });
 
   it("handles concurrent payment callbacks as one subscription", async () => {
