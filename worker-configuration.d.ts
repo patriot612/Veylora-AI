@@ -7,4 +7,6 @@ interface Env {
   TELEGRAM_WEBHOOK_SECRET?: string;
   CREDENTIAL_ENCRYPTION_KEY?: string;
   SEARXNG_URL?: string;
+  ADMIN_OWNER_TELEGRAM_ID?: string;
+  ADMIN_WEBAPP_URL?: string;
 }
