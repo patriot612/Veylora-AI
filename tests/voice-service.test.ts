@@ -66,7 +66,7 @@ describe("Voice mode", () => {
   });
 
   it("enqueues a voice operation without archiving conversation text", async () => {
-    const { userId, modelId } = await seedVoiceUser();
+    const { userId } = await seedVoiceUser();
     await enterVoiceMode(env.DB, userId, "2026-09-28T12:00:00Z");
     const sent: unknown[] = [];
     const queue = { send: async (body: unknown) => { sent.push(body); } } as unknown as Queue;
@@ -89,7 +89,6 @@ describe("Voice mode", () => {
     expect(JSON.stringify(sent[0])).toContain("voice-file-1");
     const conversations = await env.DB.prepare("SELECT COUNT(*) AS count FROM conversations WHERE user_id=?1").bind(userId).first<{count:number}>();
     expect(conversations?.count).toBe(0);
-    expect(modelId).toBeDefined();
   });
 
   it("processes a queued voice reply and charges only after delivery", async () => {
