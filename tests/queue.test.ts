@@ -69,14 +69,12 @@ describe("heavy queue producer", () => {
     expect(user?.daily_points_remaining).toBe(43);
     expect(queue.sent).toHaveLength(1);
   });
-});
 
   it("marks enqueue operations failed when points cannot be reserved", async () => {
     const { userId, modelId } = await seedHeavyUser(5, 10);
     const queue = fakeQueue();
     const operationId = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,10,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
-
     await expect(enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 10, now: "2026-09-28T12:00:00Z" })).rejects.toThrow("insufficient_points");
     const operation = await env.DB.prepare("SELECT status,error_code FROM operations WHERE id=?1").bind(operationId).first<{status:string;error_code:string|null}>();
     expect(operation?.status).toBe("failed");
@@ -89,18 +87,8 @@ describe("heavy queue producer", () => {
     const operationId = crypto.randomUUID();
     const queue = fakeQueue();
     await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,14,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
-
-    const enqueue = () => enqueueHeavyJob({
-      db: env.DB,
-      queue,
-      operationId,
-      userId,
-      jobType: "image",
-      pointsCost: 14,
-      now: "2026-09-28T12:00:00Z",
-    });
+    const enqueue = () => enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 14, now: "2026-09-28T12:00:00Z" });
     await Promise.all([enqueue(), enqueue()]);
-
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
     const operation = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
     const job = await env.DB.prepare("SELECT status FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string}>();
@@ -109,6 +97,7 @@ describe("heavy queue producer", () => {
     expect(job?.status).toBe("pending");
     expect(queue.sent).toHaveLength(1);
   });
+});
 
 describe("heavy queue consumer", () => {
   it("processes success exactly once and captures reservation", async () => {
@@ -141,23 +130,11 @@ describe("heavy queue consumer", () => {
     const queue = fakeQueue();
     await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,11,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 11, now: "2026-09-28T12:00:00Z" });
-
     let handlerCalls = 0;
     let releaseHandler!: () => void;
-    const handlerStarted = new Promise<void>((resolve) => {
-      releaseHandler = resolve;
-    });
-    const handler = async () => {
-      handlerCalls += 1;
-      await handlerStarted;
-      return { ok: true } as const;
-    };
-    const deps = {
-      db: env.DB,
-      now: () => "2026-09-28T12:01:00Z",
-      handlers: { image: handler, voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) },
-    };
-
+    const handlerStarted = new Promise<void>((resolve) => { releaseHandler = resolve; });
+    const handler = async () => { handlerCalls += 1; await handlerStarted; return { ok: true } as const; };
+    const deps = { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: handler, voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) } };
     const first = processQueueMessage(fakeMessage(queue.sent[0]), deps);
     await new Promise((resolve) => setTimeout(resolve, 0));
     const secondMessage = fakeMessage(queue.sent[0]);
@@ -165,7 +142,6 @@ describe("heavy queue consumer", () => {
     expect(second).toBe("retried");
     expect(secondMessage.retried).toBe(true);
     expect(handlerCalls).toBe(1);
-
     releaseHandler();
     expect(await first).toBe("acked");
     expect(handlerCalls).toBe(1);
@@ -178,21 +154,8 @@ describe("heavy queue consumer", () => {
     await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,12,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 12, now: "2026-09-28T12:00:00Z" });
     await env.DB.prepare("UPDATE queue_jobs SET status='processing', attempt=1, updated_at='2026-09-28T12:00:00Z' WHERE operation_id=?1").bind(operationId).run();
-
     let handlerCalls = 0;
-    const result = await processQueueMessage(fakeMessage(queue.sent[0]), {
-      db: env.DB,
-      now: () => "2026-09-28T12:11:00Z",
-      handlers: {
-        image: async () => {
-          handlerCalls += 1;
-          return { ok: true };
-        },
-        voice: async () => ({ ok: true }),
-        document: async () => ({ ok: true }),
-      },
-    });
-
+    const result = await processQueueMessage(fakeMessage(queue.sent[0]), { db: env.DB, now: () => "2026-09-28T12:11:00Z", handlers: { image: async () => { handlerCalls += 1; return { ok: true }; }, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) } });
     const job = await env.DB.prepare("SELECT status, attempt FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string;attempt:number}>();
     expect(result).toBe("acked");
     expect(handlerCalls).toBe(1);
@@ -240,15 +203,13 @@ describe("heavy queue consumer", () => {
   it("captures a delivered job instead of releasing points when it reaches DLQ", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 13);
     const operationId = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,13,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
     const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,13,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 13, now: "2026-09-28T12:00:00Z" });
     await env.DB.prepare("UPDATE operations SET status='delivering', telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(operationId, userId).run();
     const message = fakeMessage(queue.sent[0]);
     const batch = { queue: "veylora-ai-jobs-dlq", messages: [message] } as unknown as MessageBatch<unknown>;
-
     await processDeadLetterBatch(batch, env.DB, () => "2026-09-28T12:02:00Z");
-
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
     const operation = await env.DB.prepare("SELECT status,error_code FROM operations WHERE id=?1").bind(operationId).first<{status:string;error_code:string|null}>();
     const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(operationId).first<{status:string}>();
@@ -262,8 +223,8 @@ describe("heavy queue consumer", () => {
   it("terminally fails dead-lettered jobs and releases points", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 8);
     const operationId = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,8,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
     const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,8,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 8, now: "2026-09-28T12:00:00Z" });
     const batch = { queue: "veylora-ai-jobs-dlq", messages: [fakeMessage(queue.sent[0])] } as unknown as MessageBatch<unknown>;
     await processDeadLetterBatch(batch, env.DB, () => "2026-09-28T12:02:00Z");
