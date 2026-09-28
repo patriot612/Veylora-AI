@@ -5,7 +5,7 @@ import { createPlanInvoice } from "../payments/service";
 import { handleImageRequest } from "../image/service";
 import { enterDocumentsMode } from "../documents/service";
 import { enterVoiceMode } from "../voice/service";
-import { answerTelegramCallbackQuery, editTelegramMessage, sendTelegramMessage } from "./api";
+import { answerTelegramCallbackQuery, deleteTelegramMessage, editTelegramMessage, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
 import { getUserLocale, t } from "../i18n";
 import { getSystemConfigInt } from "../config";
@@ -47,7 +47,10 @@ export async function handleStartCommand(
         "UPDATE users SET active_chat_model_id=COALESCE(active_chat_model_id,?2),active_mode='chat',updated_at=?3 WHERE id=?1",
       ).bind(userId, defaultModel.config_value, now).run();
     }
-    await sendTelegramMessage(botToken, chatId, t(locale, "start.greeting"), { reply_markup: mainMenuKeyboard(await isAdminTelegramUser(env, telegramUserId), locale) });
+    const mainMenu = await sendTelegramMessage(botToken, chatId, t(locale, "start.greeting"), { reply_markup: mainMenuKeyboard(false, locale) });
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.mainMenuMessageId = mainMenu.message_id;
+    await setUiPreferences(env.DB, userId, prefs);
     return true;
   }
 
@@ -96,6 +99,7 @@ export async function handleTelegramCallback(
 
   if (data === "menu:chat") {
     await setMode(env.DB, userId, "chat", now);
+    if (callbackMessageId) await deleteTelegramMessage(botToken, chatId, callbackMessageId).catch(() => false);
     await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Просто отправьте сообщение.", { reply_markup: mainMenuKeyboard(false, locale) });
     return true;
   }
