@@ -11,7 +11,7 @@ export type SearchOutcome =
   | { kind: "no_result"; operationId: string }
   | { kind: "failed"; operationId: string; code: string };
 export type SearchServiceInput = {
-  db: D1Database; gateway: AIGateway; userId: string; query: string; telegramUpdateId?: number; now: string;
+  db: D1Database; gateway: AIGateway; userId: string; query: string; modelId?: string; telegramUpdateId?: number; now: string;
   searxngUrl: string; credentialEncryptionKey: string; fetchImpl?: typeof fetch;
 };
 
@@ -26,7 +26,7 @@ const EDITOR_TIMEOUT_MS = 120 * 1000;
 export async function executeSearch(input: SearchServiceInput): Promise<SearchOutcome> {
   const query = input.query.trim();
   if (!query || query.length > MAX_QUERY_CHARS) throw new Error("invalid_search_query");
-  const model = await selectSearchModel(input.db, input.userId, input.now);
+  const model = await selectSearchModel(input.db, input.userId, input.now, input.modelId);
   if (!model) throw new Error("search_model_unavailable");
 
   const operationResult = await createOperation(input.db, {
@@ -86,10 +86,13 @@ async function dbFailSearchOperation(db: D1Database, operationId: string, userId
   await db.prepare("UPDATE operations SET status='failed', error_code=?3, finished_at=?4 WHERE id=?1 AND user_id=?2 AND status='created'").bind(operationId, userId, reason, now).run();
 }
 
-async function selectSearchModel(db: D1Database, userId: string, now: string) {
+async function selectSearchModel(db: D1Database, userId: string, now: string, preferredModelId?: string) {
   const configured = await getSystemConfig(db, "search_editor_model_id");
   const models = await listSelectableModels(db, { userId, type: "search", now });
-  return (configured && models.find((model) => model.id === configured)) || models[0] || null;
+  return (preferredModelId && models.find((model) => model.id === preferredModelId))
+    || (configured && models.find((model) => model.id === configured))
+    || models[0]
+    || null;
 }
 
 
