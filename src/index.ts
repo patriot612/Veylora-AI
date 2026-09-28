@@ -13,6 +13,10 @@ import { processImageJob } from "./image/service";
 import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
 import { answerDocumentQuestion, enterDocumentsMode, enqueueDocumentUpload, processDocumentUploadJob } from "./documents/service";
 import { createPlanInvoice, settleSuccessfulPayment, validatePreCheckout } from "./payments/service";
+import { renderAdminApp } from "./admin/app";
+import { validateMiniAppInitData } from "./admin/auth";
+import { handleAdminApi } from "./admin/api";
+import { loadAdminSession } from "./admin/rbac";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -20,6 +24,25 @@ const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/admin") {
+      return renderAdminApp();
+    }
+
+    if (url.pathname.startsWith("/admin/api/")) {
+      if (!env.TELEGRAM_BOT_TOKEN) return jsonResponse({ error: "admin_bot_token_missing" }, 500);
+      const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
+      try {
+        const identity = await validateMiniAppInitData(initData, env.TELEGRAM_BOT_TOKEN);
+        const bootstrapOwner = env.ADMIN_OWNER_TELEGRAM_ID ? Number(env.ADMIN_OWNER_TELEGRAM_ID) : undefined;
+        const session = await loadAdminSession(env.DB, identity, Number.isSafeInteger(bootstrapOwner) ? bootstrapOwner : undefined);
+        if (!session) return jsonResponse({ error: "admin_forbidden" }, 403);
+        return handleAdminApi(request, env, session);
+      } catch (error) {
+        const status = error instanceof Error && error.message === "admin_forbidden" ? 403 : 401;
+        return jsonResponse({ error: status === 403 ? "admin_forbidden" : "admin_unauthorized" }, status);
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/healthz") {
       return new Response(JSON.stringify({ ok: true, environment: env.ENVIRONMENT }), { status: 200, headers: { ...jsonHeaders, "cache-control": "no-store" } });
     }
@@ -93,6 +116,26 @@ export default {
               envelope.chat_id,
               "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.",
             );
+          }
+          if (command === "/admin") {
+            if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+            const bootstrapOwner = env.ADMIN_OWNER_TELEGRAM_ID ? Number(env.ADMIN_OWNER_TELEGRAM_ID) : undefined;
+            const role = await loadAdminSession(
+              env.DB,
+              { id: user.telegram_user_id, username: user.username ?? undefined, firstName: user.first_name ?? undefined, rawUser: { id: user.telegram_user_id }, authDate: Math.floor(Date.now() / 1000) },
+              Number.isSafeInteger(bootstrapOwner) ? bootstrapOwner : undefined,
+            );
+            if (!role) {
+              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Доступ к Admin Mini App запрещён.");
+            } else {
+              const webAppUrl = env.ADMIN_WEBAPP_URL || (new URL(request.url).origin + "/admin");
+              await sendTelegramMessage(
+                env.TELEGRAM_BOT_TOKEN,
+                envelope.chat_id,
+                "Admin Mini App",
+                { reply_markup: { inline_keyboard: [[{ text: "Открыть Admin", web_app: { url: webAppUrl } }]] } },
+              );
+            }
           }
           if (command === "/documents") {
             await enterDocumentsMode(env.DB, user.id, now);
