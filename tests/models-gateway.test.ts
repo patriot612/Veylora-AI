@@ -67,6 +67,7 @@ describe("model registry", () => {
     const paidIds = await seedBase(subscribedUser, true);
     await env.DB.prepare("UPDATE models SET subscription_only = 1 WHERE id=?1").bind(paidIds.modelId).run();
     expect((await listSelectableModels(env.DB, { userId: subscribedUser, type: "chat", now: "2026-09-28T12:00:00Z" })).some((m) => m.id === paidIds.modelId)).toBe(true);
+    await expect(resolveModel(env.DB, { userId: subscribedUser, modelId: paidIds.modelId, expectedType: "chat", now: "2026-09-28T12:00:00Z", credentialEncryptionKey: masterKey })).resolves.toMatchObject({ id: paidIds.modelId });
   });
 });
 
