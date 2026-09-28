@@ -151,17 +151,20 @@ export async function handleTelegramCallback(
 
   if (data.startsWith("image_model:")) {
     const modelId = data.slice("image_model:".length);
-    const model = await env.DB.prepare("SELECT subscription_only FROM models WHERE id=?1 AND type='image' AND enabled=1").bind(modelId).first<{ subscription_only:number }>();
+    const model = await env.DB.prepare("SELECT display_name,points_cost,subscription_only FROM models WHERE id=?1 AND type='image' AND enabled=1").bind(modelId).first<{ display_name:string; points_cost:number; subscription_only:number }>();
     if (!model) throw new Error("image_model_unavailable");
     if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"));
       return true;
     }
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.imageModelId = modelId;
     await setUiPreferences(env.DB, userId, prefs);
     await setMode(env.DB, userId, "image", now);
-    await sendTelegramMessage(botToken, chatId, "Модель изображения выбрана. Отправьте описание.");
+    const templateId = typeof prefs.imageTemplateId === "string" ? prefs.imageTemplateId : "";
+    const template = templateId ? await env.DB.prepare("SELECT extra_points_cost FROM image_templates WHERE id=?1 AND enabled=1").bind(templateId).first<{extra_points_cost:number}>() : null;
+    const total = model.points_cost + (template?.extra_points_cost ?? 0);
+    await sendTelegramMessage(botToken, chatId, model.display_name + " · " + total + " б.\nОтправьте описание изображения.");
     return true;
   }
 
@@ -602,13 +605,14 @@ export async function handleImageText(
     modelId: typeof prefs.imageModelId === "string" ? prefs.imageModelId : undefined,
     size: typeof prefs.imageSize === "string" ? prefs.imageSize : undefined,
     quality: typeof prefs.imageQuality === "string" ? prefs.imageQuality : undefined,
+    format: typeof prefs.imageFormat === "string" ? prefs.imageFormat : undefined,
     templateId: typeof prefs.imageTemplateId === "string" ? prefs.imageTemplateId : undefined,
     telegramUpdateId,
     chatId,
     now,
     encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
   });
-  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "error" in result ? "Не удалось принять запрос на изображение: " + result.error : "🎨 Генерация изображения запущена.");
+  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "error" in result ? t(await getUserLocale(env.DB, userId), "image.failed", { reason: result.error }) : t(await getUserLocale(env.DB, userId), "image.started"));
   return true;
 }
 
