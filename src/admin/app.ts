@@ -47,7 +47,9 @@ async function render(tab){
       return;
    }
    if(tab==="models"){
-      app.innerHTML='<div class="card"><button data-action="refresh">Refresh</button><div>'+rows.map(r=>'<div class="card"><strong>'+esc(r.display_name)+'</strong><div class="muted">'+esc(r.type)+' · '+esc(r.provider_name)+' · '+esc(r.credential_name)+'</div><div>cost='+esc(r.points_cost)+' subscription='+esc(r.subscription_only)+' enabled='+esc(r.enabled)+'</div><button data-action="edit-model" data-id="'+esc(r.id)+'">Edit</button></div>').join('')+'</div></div>';
+      app.innerHTML='<div class="card"><button data-action="new-model">Add model</button> <button data-action="refresh">Refresh</button><div>'+
+       rows.map(r=>'<div class="card"><strong>'+esc(r.display_name)+'</strong><div class="muted">'+esc(r.family_name)+' · '+esc(r.type)+' · provider routing configured</div><div>cost='+esc(r.points_cost)+' subscription='+esc(r.subscription_only)+' enabled='+esc(r.enabled)+' model='+esc(r.provider_model_id)+'</div><button data-action="edit-model" data-id="'+esc(r.id)+'">Edit</button> <button data-action="delete-model" data-id="'+esc(r.id)+'">Delete</button></div>').join('')+
+       '</div></div>';
       return;
    }
    if(tab==="providers"){
@@ -82,10 +84,31 @@ async function userBonus(id){
  await api("users/"+encodeURIComponent(id)+"/bonus",{method:"POST",body:JSON.stringify({amount:Number(amount)})});
  await render("users");
 }
+async function createModel(){
+ const options=await api("models/options");
+ const families=options.families||[]; const providers=options.providers||[]; const credentials=options.credentials||[];
+ const id=(prompt("Model ID")||crypto.randomUUID()).trim();
+ const familyId=prompt("Family ID\n"+families.map(x=>x.id+" = "+x.name).join("\n")); if(!familyId) return;
+ const providerId=prompt("Provider ID\n"+providers.map(x=>x.id+" = "+x.name).join("\n")); if(!providerId) return;
+ const providerCredentials=credentials.filter(x=>x.provider_id===providerId);
+ const credentialId=prompt("Credential ID\n"+providerCredentials.map(x=>x.id+" = "+x.name).join("\n")); if(!credentialId) return;
+ const displayName=prompt("Display name"); if(!displayName) return;
+ const type=prompt("Type (chat/search/image/voice)","chat"); if(!type) return;
+ const providerModelId=prompt("Provider model ID"); if(!providerModelId) return;
+ const pointsCost=Number(prompt("Points cost","1")||"0");
+ const subscriptionOnly=confirm("Subscription-only?");
+ await api("models",{method:"POST",body:JSON.stringify({id,familyId,providerId,credentialId,displayName,type,providerModelId,pointsCost,subscriptionOnly,enabled:true})});
+ await render("models");
+}
 async function editModel(id){
  const points=prompt("Points cost"); if(points===null) return;
  const enabled=confirm("Enable model?"); const subscriptionOnly=confirm("Subscription-only?");
  await api("models/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({pointsCost:Number(points),enabled,subscriptionOnly})});
+ await render("models");
+}
+async function deleteModel(id){
+ if(!confirm("Delete model?")) return;
+ await api("models/"+encodeURIComponent(id),{method:"DELETE"});
  await render("models");
 }
 async function searchUsers(){
@@ -175,7 +198,9 @@ app.addEventListener("click",async(event)=>{
   if(action==="refresh") return render(nav.querySelector(".tab")?.textContent||"dashboard");
   if(action==="search-users") return searchUsers();
   if(action==="bonus-user") return userBonus(id);
+  if(action==="new-model") return createModel();
   if(action==="edit-model") return editModel(id);
+  if(action==="delete-model") return deleteModel(id);
   if(action==="new-provider") return createProvider();
   if(action==="edit-provider") return editProvider(id);
   if(action==="add-credential") return addCredential(id);
