@@ -95,7 +95,7 @@ describe("document service", () => {
       { db: env.DB, botToken: "bot", now: () => "2026-09-28T12:02:00Z", fetchImpl },
     );
     expect(second).toEqual({ ok: true });
-    expect(sendCalls).toBe(2);
+    expect(sendCalls).toBe(1);
   });
 
   it("answers document questions from top-ranked excerpts and settles the question charge", async () => {
