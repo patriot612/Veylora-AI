@@ -13,3 +13,5 @@ export function hasValidWebhookSecret(request: Request, expected: string | undef
 export function isTelegramWebhookPath(pathname: string): boolean {
   return pathname === "/telegram/webhook";
 }
+
+// Authentication helpers are deliberately kept framework-independent for unit testing.
