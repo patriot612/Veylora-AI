@@ -1,3 +1,5 @@
+import { grantBonusPoints } from "../subscriptions";
+import { refundTelegramStarPayment } from "../telegram/api";
 import { assertPermission, type AdminPermission } from "./rbac";
 import type { AdminSession } from "./auth";
 
@@ -14,15 +16,17 @@ export async function handleAdminApi(
     return Response.json({ ok: true, user: session.identity, role: session.role }, { headers: noStore() });
   }
 
+  const parts = path.split("/").filter(Boolean);
+  const prefix = parts[0] ?? "";
   const routes: Array<{ prefix: string; permission: AdminPermission; handler: () => Promise<Response> }> = [
     { prefix: "dashboard", permission: "dashboard.read", handler: () => dashboard(env, session) },
-    { prefix: "users", permission: "users.read", handler: () => users(env) },
-    { prefix: "models", permission: "models.read", handler: () => models(env) },
+    { prefix: "users", permission: "users.read", handler: () => users(env, request, session, parts.slice(1)) },
+    { prefix: "models", permission: "models.read", handler: () => models(env, request, session, parts.slice(1)) },
     { prefix: "providers", permission: "providers.read", handler: () => providers(env) },
-    { prefix: "roles", permission: "roles.write", handler: () => roles(env) },
-    { prefix: "templates", permission: "templates.write", handler: () => templates(env) },
-    { prefix: "plans", permission: "plans.write", handler: () => plans(env) },
-    { prefix: "payments", permission: "payments.read", handler: () => payments(env) },
+    { prefix: "roles", permission: "roles.write", handler: () => roles(env, request, session, parts.slice(1)) },
+    { prefix: "templates", permission: "templates.write", handler: () => templates(env, request, session, parts.slice(1)) },
+    { prefix: "plans", permission: "plans.write", handler: () => plans(env, request, session, parts.slice(1)) },
+    { prefix: "payments", permission: "payments.read", handler: () => payments(env, request, session, parts.slice(1)) },
     { prefix: "search", permission: "search.read", handler: () => search(env) },
     { prefix: "statistics", permission: "statistics.read", handler: () => statistics(env) },
     { prefix: "queue", permission: "queue.read", handler: () => queue(env) },
@@ -30,7 +34,7 @@ export async function handleAdminApi(
     { prefix: "config", permission: "system.write", handler: () => config(env, request, session) },
   ];
 
-  const route = routes.find((candidate) => path === candidate.prefix || path.startsWith(candidate.prefix + "/"));
+  const route = routes.find((candidate) => prefix === candidate.prefix);
   if (!route) return Response.json({ error: "not_found" }, { status: 404, headers: noStore() });
   assertPermission(session, route.permission);
   return route.handler();
