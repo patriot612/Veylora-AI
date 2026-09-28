@@ -36,6 +36,22 @@ export type GatewayImageResult = {
   bytes?: Uint8Array;
   contentType?: string;
 };
+export type GatewayVoiceRequest = {
+  userId: string;
+  modelId: string;
+  input: ArrayBuffer;
+  inputContentType: string;
+  now: string;
+  timeoutMs?: number;
+};
+
+export type GatewayVoiceResult = {
+  modelId: string;
+  bytes: Uint8Array;
+  contentType: string;
+  providerRequestId?: string;
+};
+
 
 export class AIGateway {
   constructor(
@@ -75,6 +91,53 @@ export class AIGateway {
       if (error instanceof ProviderGatewayError) throw error;
       if (controller.signal.aborted) throw new ProviderGatewayError("provider_timeout", "Provider image request timed out", true, { cause: error });
       throw new ProviderGatewayError("provider_unavailable", "Provider image request failed", true, { cause: error });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async generateVoiceReply(input: GatewayVoiceRequest): Promise<GatewayVoiceResult> {
+    const model = await resolveModel(this.db, {
+      userId: input.userId,
+      modelId: input.modelId,
+      expectedType: "voice",
+      now: input.now,
+      credentialEncryptionKey: this.encryptionKey,
+    });
+
+    const adapter = this.adapters.get(model.providerAdapterType);
+    if (!adapter) throw new ProviderGatewayError("provider_unsupported", "Voice provider adapter is not configured", false);
+
+    const controller = new AbortController();
+    const timeout = input.timeoutMs ?? 300_000;
+    const timer = setTimeout(() => controller.abort("provider_timeout"), timeout);
+    try {
+      const response = await adapter.invoke({
+        operationType: "voice",
+        providerModelId: model.providerModelId,
+        endpoint: model.endpoint,
+        credential: model.credentialSecret,
+        input: input.input,
+        inputContentType: input.inputContentType,
+        voiceMode: "reply",
+        config: model.config,
+        signal: controller.signal,
+      });
+      if (response.kind !== "binary") {
+        throw new ProviderGatewayError("provider_invalid_response", "Voice provider did not return audio", false);
+      }
+      return {
+        modelId: model.id,
+        bytes: response.bytes,
+        contentType: response.contentType,
+        providerRequestId: response.providerRequestId,
+      };
+    } catch (error) {
+      if (error instanceof ProviderGatewayError) throw error;
+      if (controller.signal.aborted) {
+        throw new ProviderGatewayError("provider_timeout", "Provider voice request timed out", true, { cause: error });
+      }
+      throw new ProviderGatewayError("provider_unavailable", "Provider voice request failed", true, { cause: error });
     } finally {
       clearTimeout(timer);
     }
