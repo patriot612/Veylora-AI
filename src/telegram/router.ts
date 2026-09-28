@@ -23,6 +23,7 @@ export type TelegramUpdateEnvelope = {
   message_id?: number;
   text?: string;
   callbackData?: string;
+  document?: { fileId: string; fileName?: string; mimeType?: string; fileSize?: number };
 };
 
 export function classifyTelegramUpdate(update: Record<string, unknown>): TelegramUpdateEnvelope {
@@ -40,7 +41,24 @@ export function classifyTelegramUpdate(update: Record<string, unknown>): Telegra
     const meta = { ...(chatId !== undefined ? { chat_id: chatId } : {}), ...(messageId !== undefined ? { message_id: messageId } : {}) };
     if (text?.startsWith("/")) return { update_id: updateId, user, kind: "command", ...meta };
     if (text) return { update_id: updateId, user, kind: "text", ...meta, text };
-    if (isRecord(message.document)) return { update_id: updateId, user, kind: "document", ...meta };
+    if (isRecord(message.document)) {
+      const document = message.document;
+      if (typeof document.file_id === "string") {
+        return {
+          update_id: updateId,
+          user,
+          kind: "document",
+          ...meta,
+          document: {
+            fileId: document.file_id,
+            ...(typeof document.file_name === "string" ? { fileName: document.file_name } : {}),
+            ...(typeof document.mime_type === "string" ? { mimeType: document.mime_type } : {}),
+            ...(typeof document.file_size === "number" ? { fileSize: document.file_size } : {}),
+          },
+        };
+      }
+      return { update_id: updateId, user, kind: "unknown", ...meta };
+    }
     if (Array.isArray(message.photo)) return { update_id: updateId, user, kind: "photo", ...meta };
     if (isRecord(message.voice)) return { update_id: updateId, user, kind: "voice", ...meta };
     if (isRecord(message.successful_payment)) return { update_id: updateId, user, kind: "payment", ...meta };
