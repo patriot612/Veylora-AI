@@ -7,6 +7,7 @@ import { createOperation, transitionOperation } from "../operations/service";
 import { getActivePlan } from "../subscriptions";
 import type { GatewayMessage } from "../providers/types";
 import { TelegramApiError } from "../telegram/api";
+import { getUserLocale, t } from "../i18n";
 
 export type ChatRequest = {
   db: D1Database;
@@ -32,9 +33,10 @@ const FAILURE_MESSAGE = "Не удалось получить ответ. Поп
 
 export async function handleChatMessage(input: ChatRequest): Promise<ChatResult> {
   const text = input.text.trim();
+  const locale = await getUserLocale(input.db, input.userId);
   const maxChars = await getSystemConfigInt(input.db, "limits.chat_chars", 4096);
   if (!text || text.length > maxChars) {
-    await safeSend(input.send, `Максимальная длина сообщения — ${maxChars} символов.`);
+    await safeSend(input.send, locale === "ru" ? `Максимальная длина сообщения — ${maxChars} символов.` : `${t(locale, "chat.failed")} (max ${maxChars})`);
     return { kind: "invalid_input", retryable: false };
   }
 
@@ -44,7 +46,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
     .first<{ active_operation_id: string | null }>();
 
   if (existingLock?.active_operation_id) {
-    await safeSend(input.send, BUSY_MESSAGE);
+    await safeSend(input.send, t(locale, "chat.busy"));
     return { kind: "busy", retryable: true };
   }
 
@@ -52,7 +54,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
   const modelId = conversation?.model_id ?? await getSelectedChatModelId(input.db, input.userId);
 
   if (!modelId) {
-    await safeSend(input.send, "Модель Chat ещё не настроена.");
+    await safeSend(input.send, t(locale, "chat.modelMissing"));
     return { kind: "failed", retryable: false };
   }
 
@@ -67,10 +69,10 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
     });
   } catch (error) {
     if (error instanceof Error && error.message === "subscription_required") {
-      await safeSend(input.send, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      await safeSend(input.send, t(locale, "subscription.required"));
       return { kind: "subscription_required", retryable: false };
     }
-    await safeSend(input.send, FAILURE_MESSAGE);
+    await safeSend(input.send, t(locale, "chat.failed"));
     return { kind: "failed", retryable: true };
   }
 
@@ -128,11 +130,11 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
         now: new Date().toISOString(),
         errorCode: reservation.reason,
       });
-      await safeSend(input.send, INSUFFICIENT_POINTS_MESSAGE);
+      await safeSend(input.send, t(locale, "billing.insufficient"));
       return { kind: "insufficient_points", operationId: operation.operation.id, retryable: false };
     }
 
-    const temporary = await input.send("✋ Формулирую ответ...");
+    const temporary = await input.send(t(locale, "chat.processing"));
     temporaryMessageId = temporary.message_id;
     await transitionOperation(input.db, {
       operationId: operation.operation.id,
@@ -197,9 +199,9 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
       }).catch(() => false);
 
       if (temporaryMessageId) {
-        await safeEdit(input.edit, temporaryMessageId, FAILURE_MESSAGE + "\n[Повторить]");
+        await safeEdit(input.edit, temporaryMessageId, t(locale, "chat.failed") + "\n[🔄 Retry]");
       } else {
-        await safeSend(input.send, FAILURE_MESSAGE + "\n[Повторить]");
+        await safeSend(input.send, t(locale, "chat.failed") + "\n[🔄 Retry]");
       }
     }
 
