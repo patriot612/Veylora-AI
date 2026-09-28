@@ -141,6 +141,7 @@ export async function answerDocumentQuestion(input: { db: D1Database; gateway: A
   if (operation.duplicate) return { error: "duplicate_document_question" };
   const reservation = await reservePoints(input.db, input.userId, operation.operation.id, questionCost, input.now);
   if (!reservation.ok) return { error: "insufficient_points" };
+  await transitionOperation(input.db, { operationId: operation.operation.id, userId: input.userId, to: "processing", now: input.now });
   try {
     const rows = await input.db.prepare("SELECT id, content FROM document_chunks WHERE session_id=?1 AND expires_at>?2 ORDER BY chunk_index ASC").bind(session.id, input.now).all<{id:string;content:string}>();
     const topChunks = rankChunks(rows.results ?? [], question, await getSystemConfigInt(input.db, "limits.document_top_chunks", 6));
