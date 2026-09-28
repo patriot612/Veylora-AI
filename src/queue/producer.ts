@@ -1,6 +1,5 @@
 import type { HeavyJobType, QueueJobMessage } from "./types";
 import { releaseReservation, reservePoints } from "../billing/points";
-import { transitionOperation } from "../operations/service";
 
 export type EnqueueHeavyJobInput = {
   db: D1Database;
