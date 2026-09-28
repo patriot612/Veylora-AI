@@ -17,7 +17,8 @@ describe("document extraction", () => {
   it("extracts DOCX text from word/document.xml without storing binary payload", async () => {
     const xml = '<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p><w:p><w:r><w:t>World &amp; Docs</w:t></w:r></w:p></w:body></w:document>';
     const bytes = zipSync({ "word/document.xml": strToU8(xml) });
-    const result = await extractDocument(bytes.buffer, "docx", env.DB);
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const result = await extractDocument(buffer, "docx", env.DB);
     expect(result.text).toContain("Hello");
     expect(result.text).toContain("World & Docs");
   });
