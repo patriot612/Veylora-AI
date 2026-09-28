@@ -29,7 +29,7 @@ tg?.ready(); tg?.expand();
 const initData=tg?.initData||"";
 const app=document.getElementById("app");
 const nav=document.getElementById("nav");
-const tabs=["dashboard","users","models","providers","roles","templates","plans","payments","queue","audit","config"];
+const tabs=["dashboard","users","models","providers","roles","templates","plans","payments","search","statistics","queue","audit","config"];
 function esc(v){return String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 async function api(path,options={}){const res=await fetch("/admin/api/"+path,{...options,headers:{"content-type":"application/json","X-Telegram-Init-Data":initData,...(options.headers||{})}});const body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body.error||"request_failed");return body;}
 async function render(tab){
