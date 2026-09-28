@@ -18,15 +18,21 @@ export async function runScheduledCleanup(db: D1Database, now: string): Promise<
   let documentChunks = 0;
   if (expiredSessions.results.length > 0) {
     const ids = expiredSessions.results.map((row) => row.id);
-    const placeholders = ids.map((_, index) => `?${index + 1}`).join(",");
+    const placeholders = ids.map((_, index) => `?${index + 2}`).join(",");
+
+    await db
+      .prepare("UPDATE users SET active_document_session_id=NULL, updated_at=?1 WHERE active_document_session_id IN (" + placeholders + ")")
+      .bind(now, ...ids)
+      .run();
+
     const deletedChunks = await db
-      .prepare(`DELETE FROM document_chunks WHERE session_id IN (${placeholders})`)
+      .prepare(`DELETE FROM document_chunks WHERE session_id IN (${ids.map((_, index) => `?${index + 1}`).join(",")})`)
       .bind(...ids)
       .run();
     documentChunks = deletedChunks.meta.changes ?? 0;
 
     await db
-      .prepare(`DELETE FROM document_sessions WHERE id IN (${placeholders})`)
+      .prepare(`DELETE FROM document_sessions WHERE id IN (${ids.map((_, index) => `?${index + 1}`).join(",")})`)
       .bind(...ids)
       .run();
   }
@@ -35,13 +41,6 @@ export async function runScheduledCleanup(db: D1Database, now: string): Promise<
     .prepare("UPDATE subscriptions SET status='expired', updated_at=?1 WHERE status='active' AND ends_at <= ?1")
     .bind(now)
     .run();
-
-  if (expiredSessions.results.length > 0) {
-    await db
-      .prepare("UPDATE users SET active_document_session_id=NULL, updated_at=?1 WHERE active_document_session_id IN (SELECT id FROM document_sessions WHERE expires_at <= ?1)")
-      .bind(now)
-      .run();
-  }
 
   return {
     documentSessions: expiredSessions.results.length,
