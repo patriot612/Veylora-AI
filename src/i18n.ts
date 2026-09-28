@@ -9,6 +9,8 @@ type Message = string | ((vars: Vars) => string);
 const messages: Record<Locale, Record<string, Message>> = {
   ru: {
     "common.back": "← Назад",
+    "menu.chat": "💬 Чат", "menu.image": "🎨 Изображения", "menu.model": "🤖 Сменить модель", "menu.dialogs": "📖 Мои диалоги", "menu.tools": "🧰 Инструменты", "menu.account": "👤 Аккаунт", "menu.search": "🔎 Поиск", "menu.documents": "📄 Документы", "menu.roles": "🎭 Роли",
+    "account.plans": "Подписка и баллы", "account.orders": "Мои заказы", "language.self": "Русский",
     "common.toChat": "💬 В чат",
     "common.toAccount": "← К аккаунту",
     "common.help": "❓ Помощь",
@@ -49,6 +51,8 @@ const messages: Record<Locale, Record<string, Message>> = {
   },
   en: {
     "common.back": "← Back",
+    "menu.chat": "💬 Chat", "menu.image": "🎨 Images", "menu.model": "🤖 Change model", "menu.dialogs": "📖 My dialogs", "menu.tools": "🧰 Tools", "menu.account": "👤 Account", "menu.search": "🔎 Search", "menu.documents": "📄 Documents", "menu.roles": "🎭 Roles",
+    "account.plans": "Plans & points", "account.orders": "My orders", "language.self": "English",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Account",
     "common.help": "❓ Help",
@@ -89,6 +93,8 @@ const messages: Record<Locale, Record<string, Message>> = {
   },
   uz: {
     "common.back": "← Orqaga",
+    "menu.chat": "💬 Chat", "menu.image": "🎨 Rasmlar", "menu.model": "🤖 Modelni almashtirish", "menu.dialogs": "📖 Muloqotlarim", "menu.tools": "🧰 Asboblar", "menu.account": "👤 Akkaunt", "menu.search": "🔎 Qidiruv", "menu.documents": "📄 Hujjatlar", "menu.roles": "🎭 Rollar",
+    "account.plans": "Obuna va ballar", "account.orders": "Buyurtmalarim", "language.self": "O'zbek",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Akkaunt",
     "common.help": "❓ Yordam",
@@ -129,6 +135,8 @@ const messages: Record<Locale, Record<string, Message>> = {
   },
   fr: {
     "common.back": "← Retour",
+    "menu.chat": "💬 Chat", "menu.image": "🎨 Images", "menu.model": "🤖 Changer de modèle", "menu.dialogs": "📖 Mes dialogues", "menu.tools": "🧰 Outils", "menu.account": "👤 Compte", "menu.search": "🔎 Recherche", "menu.documents": "📄 Documents", "menu.roles": "🎭 Rôles",
+    "account.plans": "Abonnement et points", "account.orders": "Mes commandes", "language.self": "Français",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Compte",
     "common.help": "❓ Aide",
@@ -169,6 +177,8 @@ const messages: Record<Locale, Record<string, Message>> = {
   },
   de: {
     "common.back": "← Zurück",
+    "menu.chat": "💬 Chat", "menu.image": "🎨 Bilder", "menu.model": "🤖 Modell wechseln", "menu.dialogs": "📖 Meine Dialoge", "menu.tools": "🧰 Tools", "menu.account": "👤 Konto", "menu.search": "🔎 Suche", "menu.documents": "📄 Dokumente", "menu.roles": "🎭 Rollen",
+    "account.plans": "Abo und Punkte", "account.orders": "Meine Bestellungen", "language.self": "Deutsch",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Konto",
     "common.help": "❓ Hilfe",
