@@ -12,6 +12,7 @@ import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
 import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
 import { answerDocumentQuestion, enterDocumentsMode, enqueueDocumentUpload, processDocumentUploadJob } from "./documents/service";
+import { createPlanInvoice, settleSuccessfulPayment, validatePreCheckout } from "./payments/service";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -42,8 +43,57 @@ export default {
           return jsonResponse({ ok: true, ignored: true });
         }
 
+        if (envelope.kind === "pre_checkout" && envelope.preCheckout && envelope.user) {
+          if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+          await validatePreCheckout({
+            db: env.DB,
+            botToken: env.TELEGRAM_BOT_TOKEN,
+            preCheckoutQueryId: envelope.preCheckout.id,
+            telegramUserId: envelope.user.id,
+            currency: envelope.preCheckout.currency,
+            totalAmount: envelope.preCheckout.totalAmount,
+            invoicePayload: envelope.preCheckout.invoicePayload,
+          });
+        }
+
+        if (envelope.kind === "payment" && envelope.payment && envelope.user && typeof envelope.chat_id === "number") {
+          if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+          const settled = await settleSuccessfulPayment({
+            db: env.DB,
+            userId: user.id,
+            telegramUserId: envelope.user.id,
+            currency: envelope.payment.currency,
+            totalAmount: envelope.payment.totalAmount,
+            invoicePayload: envelope.payment.invoicePayload,
+            telegramPaymentChargeId: envelope.payment.chargeId,
+            now,
+          });
+          await sendTelegramMessage(
+            env.TELEGRAM_BOT_TOKEN,
+            envelope.chat_id,
+            "error" in settled ? "Платёж получен, но активация подписки требует проверки." : "Подписка активирована. Спасибо!",
+          );
+        }
+
         if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
           const command = extractMessageText(update);
+          if (command.startsWith("/buy ")) {
+            const planId = command.slice("/buy ".length).trim();
+            if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+            const invoice = await createPlanInvoice({
+              db: env.DB,
+              botToken: env.TELEGRAM_BOT_TOKEN,
+              userId: user.id,
+              chatId: envelope.chat_id,
+              planId,
+              now,
+            });
+            await sendTelegramMessage(
+              env.TELEGRAM_BOT_TOKEN,
+              envelope.chat_id,
+              "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.",
+            );
+          }
           if (command === "/documents") {
             await enterDocumentsMode(env.DB, user.id, now);
             if (env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Documents mode включён. Отправьте PDF/DOCX/TXT до 10 МБ.");
@@ -128,6 +178,24 @@ export default {
           } else {
             await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "🎙️ Обрабатываю голосовое сообщение...");
           }
+        }
+
+        if (envelope.kind === "callback" && envelope.callbackData?.startsWith("plan_buy:") && typeof envelope.chat_id === "number") {
+          if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+          const planId = envelope.callbackData.slice("plan_buy:".length);
+          const invoice = await createPlanInvoice({
+            db: env.DB,
+            botToken: env.TELEGRAM_BOT_TOKEN,
+            userId: user.id,
+            chatId: envelope.chat_id,
+            planId,
+            now,
+          });
+          await sendTelegramMessage(
+            env.TELEGRAM_BOT_TOKEN,
+            envelope.chat_id,
+            "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.",
+          );
         }
 
         if (envelope.kind === "callback" && envelope.callbackData === "voice_exit" && typeof envelope.chat_id === "number") {
