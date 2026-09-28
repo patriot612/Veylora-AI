@@ -196,4 +196,41 @@ describe("Admin Mini App HTTP surface", () => {
     });
     expect(response.status).toBe(403);
   });
+  it("manages providers and credentials without exposing encrypted secrets", async () => {
+    const ownerTelegramId = 940000007;
+    const ownerUserId = crypto.randomUUID();
+    await seedAdminUser(ownerUserId, ownerTelegramId, "owner");
+
+    const initData = await buildInitData("test-bot-token", Math.floor(Date.now() / 1000) - 30, ownerTelegramId);
+    const headers = { "X-Telegram-Init-Data": initData, "content-type": "application/json" };
+    const providerId = crypto.randomUUID();
+
+    const createdProvider = await worker.default.fetch("https://example.test/admin/api/providers/" + providerId, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "Admin Test Provider", adapterType: "openai_compatible", endpoint: "https://provider.example/v1", enabled: true }),
+    });
+    expect(createdProvider.status).toBe(200);
+
+    const credentialId = crypto.randomUUID();
+    const createdCredential = await worker.default.fetch("https://example.test/admin/api/providers/" + providerId + "/credentials/" + credentialId, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "Admin Key", secret: "super-secret", enabled: true }),
+    });
+    expect(createdCredential.status).toBe(200);
+
+    const listed = await worker.default.fetch("https://example.test/admin/api/providers/" + providerId + "/credentials", {
+      headers: { "X-Telegram-Init-Data": initData },
+    });
+    expect(listed.status).toBe(200);
+    const body = await listed.json() as { rows?: Array<Record<string, unknown>> };
+    expect(body.rows?.[0]?.name).toBe("Admin Key");
+    expect(body.rows?.[0]).not.toHaveProperty("encrypted_secret");
+
+    const stored = await env.DB.prepare("SELECT encrypted_secret FROM credentials WHERE id=?1").bind(credentialId).first<{encrypted_secret:string}>();
+    expect(stored?.encrypted_secret).toMatch(/^v1\./);
+    expect(stored?.encrypted_secret).not.toContain("super-secret");
+  });
+
 });
