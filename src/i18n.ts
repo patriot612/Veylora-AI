@@ -226,7 +226,8 @@ export function normalizeLocale(value: string | null | undefined): Locale {
 export function t(locale: string | null | undefined, key: string, vars: Vars = {}): string {
   const language = normalizeLocale(locale);
   const message = messages[language][key] ?? messages.ru[key] ?? key;
-  return typeof message === "function" ? message(vars) : message;
+  const rendered = typeof message === "function" ? message(vars) : message;
+  return rendered.replace(/\\{(\\w+)\\}/g, (_match, name: string) => String(vars[name] ?? _match));
 }
 
 export async function getUserLocale(db: D1Database, userId: string): Promise<Locale> {
