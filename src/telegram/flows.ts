@@ -258,7 +258,7 @@ export async function handleTelegramCallback(
     return true;
   }
 
-  if (data.startsWith("dialog:")) {
+  if (data.startsWith("dialog:") && !data.startsWith("dialog:messages:") && !data.startsWith("dialog:history:")) {
     const conversationId = data.slice("dialog:".length);
     try {
       const dialog = await getConversationHistory(env.DB, userId, conversationId);
