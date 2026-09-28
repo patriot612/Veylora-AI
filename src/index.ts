@@ -11,7 +11,7 @@ import { classifyTelegramUpdate } from "./telegram/router";
 import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
-import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
+import { enqueueVoiceMessage, enterVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
 import { answerDocumentQuestion, completeDocumentQuestionDelivery, enterDocumentsMode, enqueueDocumentUpload, processDocumentUploadJob, releaseDocumentQuestionDelivery } from "./documents/service";
 import { createPlanInvoice, settleSuccessfulPayment, validatePreCheckout } from "./payments/service";
 import { runScheduledCleanup } from "./cleanup";
