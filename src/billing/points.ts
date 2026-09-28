@@ -37,7 +37,7 @@ export async function reservePoints(db: D1Database, userId: string, operationId:
 }
 
 export async function settleReservation(db: D1Database, operationId: string, now: string): Promise<boolean> {
-  const current = await db.prepare('SELECT user_id, daily_amount, bonus_amount, status FROM point_reservations WHERE operation_id = ?1').bind(operationId).first<{ user_id: string; daily_amount: number; bonus_amount: number; status: string }>();
+  const current = await db.prepare('SELECT o.user_id, r.daily_amount, r.bonus_amount, r.status FROM point_reservations r JOIN operations o ON o.id = r.operation_id WHERE r.operation_id = ?1').bind(operationId).first<{ user_id: string; daily_amount: number; bonus_amount: number; status: string }>();
   if (!current) return false;
   if (current.status === 'captured') return true;
   if (current.status !== 'reserved') return false;
@@ -52,7 +52,7 @@ export async function settleReservation(db: D1Database, operationId: string, now
 }
 
 export async function releaseReservation(db: D1Database, operationId: string, now: string): Promise<boolean> {
-  const current = await db.prepare('SELECT user_id, daily_amount, bonus_amount, status FROM point_reservations WHERE operation_id = ?1').bind(operationId).first<{ user_id: string; daily_amount: number; bonus_amount: number; status: string }>();
+  const current = await db.prepare('SELECT o.user_id, r.daily_amount, r.bonus_amount, r.status FROM point_reservations r JOIN operations o ON o.id = r.operation_id WHERE r.operation_id = ?1').bind(operationId).first<{ user_id: string; daily_amount: number; bonus_amount: number; status: string }>();
   if (!current) return false;
   if (current.status === 'released') return true;
   if (current.status !== 'reserved') return false;
