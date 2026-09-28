@@ -162,6 +162,10 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
     } catch (error) {
       throw error instanceof TelegramApiError ? error : new Error("telegram_delivery_failed", { cause: error });
     }
+    await input.db
+      .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2 AND status='delivering' AND telegram_delivery_status='not_started'")
+      .bind(operation.operation.id, input.userId)
+      .run();
 
     await persistTurn(input.db, conversation.id, model.id, conversation.role_id, text, answer.text, input.now, input.userId);
     const settled = await settleReservation(input.db, operation.operation.id, new Date().toISOString());
