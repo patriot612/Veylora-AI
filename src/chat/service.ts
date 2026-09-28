@@ -32,7 +32,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
   const locale = await getUserLocale(input.db, input.userId);
   const maxChars = await getSystemConfigInt(input.db, "limits.chat_chars", 4096);
   if (!text || text.length > maxChars) {
-    await safeSend(input.send, locale === "ru" ? `Максимальная длина сообщения — ${maxChars} символов.` : `${t(locale, "chat.failed")} (max ${maxChars})`);
+    await safeSend(input.send, t(locale, "chat.maxLength", { max: maxChars }));
     return { kind: "invalid_input", retryable: false };
   }
 
