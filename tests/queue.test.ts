@@ -99,16 +99,23 @@ describe("heavy queue consumer", () => {
   it("settles after Telegram delivery without invoking the external handler again", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 10);
     const operationId = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,telegram_delivery_status,created_at) VALUES (?1,?2,'image','delivering',?3,10,'sent','2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
-    await env.DB.prepare("INSERT INTO queue_jobs (id,operation_id,queue_type,status,attempt,created_at,updated_at) VALUES (?1,?2,'image','pending',0,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')").bind(crypto.randomUUID(), operationId).run();
+    const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,10,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+    await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 10, now: "2026-09-28T12:00:00Z" });
+    await env.DB.prepare("UPDATE operations SET status='delivering', telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(operationId, userId).run();
     let handlerCalls = 0;
-    const message = fakeMessage({ version: 1, operationId, userId, jobType: "image", enqueuedAt: "2026-09-28T12:00:00Z" });
+    const message = fakeMessage(queue.sent[0]);
     const result = await processQueueMessage(message, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: async () => { handlerCalls += 1; return { ok: true }; }, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) } });
+    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
     const op = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
+    const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(operationId).first<{status:string}>();
     const job = await env.DB.prepare("SELECT status FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string}>();
     expect(result).toBe("acked");
+    expect(message.acked).toBe(true);
     expect(handlerCalls).toBe(0);
+    expect(user?.daily_points_remaining).toBe(40);
     expect(op?.status).toBe("succeeded");
+    expect(reservation?.status).toBe("captured");
     expect(job?.status).toBe("succeeded");
   });
 
