@@ -131,4 +131,26 @@ describe("image queue lifecycle", () => {
     expect(result).toEqual({ ok: false, retryable: true, code: "telegram_delivery_retry" });
     expect(providerCalls).toBe(0);
   });
+  it("rejects oversized binary image results before Telegram delivery", async () => {
+    const { userId, modelId, operationId } = await seedImageOperation(7);
+    const gateway = createAIGateway(env.DB, key, [{
+      type: "image_test",
+      async invoke() {
+        return { ok: true, kind: "image", bytes: new Uint8Array(10 * 1024 * 1024 + 1), contentType: "image/png" };
+      },
+    }]);
+    const result = await processImageJob(
+      { operationId, userId, metadata: { chatId: 123, prompt: "huge", modelId } },
+      {
+        db: env.DB,
+        gateway,
+        botToken: "bot",
+        encryptionKey: key,
+        now: () => "2026-09-28T12:03:00Z",
+        fetchImpl: async () => new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 }),
+      },
+    );
+    expect(result).toEqual({ ok: false, retryable: false, code: "image_too_large" });
+  });
+
 });
