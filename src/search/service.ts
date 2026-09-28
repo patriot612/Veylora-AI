@@ -69,7 +69,7 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
   } catch (error) {
     const code = error instanceof Error && error.name === "AbortError" ? "search_timeout" : error instanceof Error ? error.message : "search_failed";
     const now = new Date().toISOString();
-    await releaseReservation(input.db, operationId, now, code === "search_timeout" ? "timeout" : "failed");
+    await releaseReservation(input.db, operationId, now, code === "search_timeout" ? "timeout" : "failed", code);
     return { kind: "failed", operationId, code };
   }
 }
