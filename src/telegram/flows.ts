@@ -728,7 +728,7 @@ async function deliverSearchOutcome(env: Env, userId: string, chatId: number, ou
 async function isAdminTelegramUser(env: Env, telegramUserId: number): Promise<boolean> {
   const configuredOwnerId = Number(env.ADMIN_OWNER_TELEGRAM_ID);
   if (Number.isSafeInteger(configuredOwnerId) && configuredOwnerId > 0 && telegramUserId === configuredOwnerId) return true;
-  const row = await env.DB.prepare("SELECT 1 AS ok FROM users u JOIN admin_roles r ON r.user_id=u.id WHERE u.telegram_user_id=?1").bind(telegramUserId).first<{ ok: number }>();
+  const row = await env.DB.prepare("SELECT 1 AS ok FROM users u JOIN admin_roles r ON r.user_id=u.id WHERE u.telegram_user_id=?1 AND r.role IN ('owner','admin')").bind(telegramUserId).first<{ ok: number }>();
   return row?.ok === 1;
 }
 
