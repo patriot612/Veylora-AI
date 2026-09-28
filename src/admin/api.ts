@@ -1,5 +1,6 @@
 import { grantBonusPoints } from "../subscriptions";
 import { refundTelegramStarPayment } from "../telegram/api";
+import { encryptCredentialSecret } from "../security/credentials";
 import { assertPermission, type AdminPermission } from "./rbac";
 import type { AdminSession } from "./auth";
 
@@ -22,7 +23,7 @@ export async function handleAdminApi(
     { prefix: "dashboard", permission: "dashboard.read", handler: () => dashboard(env, session) },
     { prefix: "users", permission: "users.read", handler: () => users(env, request, session, parts.slice(1)) },
     { prefix: "models", permission: "models.read", handler: () => models(env, request, session, parts.slice(1)) },
-    { prefix: "providers", permission: "providers.read", handler: () => providers(env) },
+    { prefix: "providers", permission: "providers.read", handler: () => providers(env, request, session, parts.slice(1)) },
     { prefix: "roles", permission: "roles.write", handler: () => roles(env, request, session, parts.slice(1)) },
     { prefix: "templates", permission: "templates.write", handler: () => templates(env, request, session, parts.slice(1)) },
     { prefix: "plans", permission: "plans.write", handler: () => plans(env, request, session, parts.slice(1)) },
@@ -143,9 +144,85 @@ async function models(env: Env, request: Request, session: AdminSession, segment
   return Response.json({ ok: true }, { headers: noStore() });
 }
 
-async function providers(env: Env) {
-  const rows = await env.DB.prepare("SELECT id,name,adapter_type,endpoint,enabled,created_at,updated_at FROM providers ORDER BY name").all();
-  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+async function providers(env: Env, request: Request, session: AdminSession, segments: string[]) {
+  const providerId = segments[0] ?? "";
+  if (segments[1] === "credentials") {
+    if (!providerId) return Response.json({ error: "provider_id_required" }, { status: 400, headers: noStore() });
+    if (request.method === "GET") {
+      const rows = await env.DB.prepare("SELECT id,provider_id,name,key_version,enabled,created_at,updated_at FROM credentials WHERE provider_id=?1 ORDER BY name").bind(providerId).all();
+      return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+    }
+    assertPermission(session, "credentials.write");
+    const credentialId = segments[2] ?? (request.method === "POST" ? crypto.randomUUID() : "");
+    if (!credentialId) return Response.json({ error: "credential_id_required" }, { status: 400, headers: noStore() });
+    if (request.method === "DELETE") {
+      const result = await env.DB.prepare("DELETE FROM credentials WHERE id=?1 AND provider_id=?2").bind(credentialId, providerId).run();
+      if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "credential_not_found" }, { status: 404, headers: noStore() });
+      await writeAudit(env.DB, await adminActorId(env.DB, session), "credential.delete", "credential", credentialId, session.role);
+      return Response.json({ ok: true }, { headers: noStore() });
+    }
+    if (request.method !== "POST" && request.method !== "PUT") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
+    const body = await request.json<{name?:unknown;secret?:unknown;enabled?:unknown}>();
+    if (typeof body.name !== "string" || body.name.trim().length === 0 || body.name.length > 160) return Response.json({ error: "invalid_credential_name" }, { status: 400, headers: noStore() });
+    const enabled = body.enabled === false ? 0 : 1;
+    const provider = await env.DB.prepare("SELECT id FROM providers WHERE id=?1").bind(providerId).first<{id:string}>();
+    if (!provider) return Response.json({ error: "provider_not_found" }, { status: 404, headers: noStore() });
+    if (request.method === "POST" && typeof body.secret !== "string") return Response.json({ error: "credential_secret_required" }, { status: 400, headers: noStore() });
+
+    if (request.method === "PUT") {
+      const existing = await env.DB.prepare("SELECT encrypted_secret,key_version FROM credentials WHERE id=?1 AND provider_id=?2").bind(credentialId, providerId).first<{encrypted_secret:string;key_version:number}>();
+      if (!existing) return Response.json({ error: "credential_not_found" }, { status: 404, headers: noStore() });
+      const encrypted = typeof body.secret === "string" && body.secret.length > 0
+        ? await encryptCredentialSecret(body.secret, env.CREDENTIAL_ENCRYPTION_KEY)
+        : existing.encrypted_secret;
+      const result = await env.DB.prepare("UPDATE credentials SET name=?3,encrypted_secret=?4,key_version=?5,enabled=?6,updated_at=?7 WHERE id=?1 AND provider_id=?2")
+        .bind(credentialId, providerId, body.name.trim(), encrypted, existing.key_version, enabled, new Date().toISOString()).run();
+      if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "credential_update_failed" }, { status: 409, headers: noStore() });
+    } else {
+      const encrypted = await encryptCredentialSecret(body.secret as string, env.CREDENTIAL_ENCRYPTION_KEY);
+      await env.DB.prepare("INSERT INTO credentials (id,provider_id,name,encrypted_secret,key_version,enabled,created_at,updated_at) VALUES (?1,?2,?3,?4,1,?5,?6,?6)")
+        .bind(credentialId, providerId, body.name.trim(), encrypted, enabled, new Date().toISOString()).run();
+    }
+    await writeAudit(env.DB, await adminActorId(env.DB, session), request.method === "POST" ? "credential.create" : "credential.update", "credential", credentialId, session.role);
+    return Response.json({ ok: true, id: credentialId }, { headers: noStore() });
+  }
+
+  if (request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT id,name,adapter_type,endpoint,enabled,created_at,updated_at FROM providers ORDER BY name").all();
+    return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+  }
+
+  assertPermission(session, "providers.write");
+  const id = providerId || (request.method === "POST" ? crypto.randomUUID() : "");
+  if (!id) return Response.json({ error: "provider_id_required" }, { status: 400, headers: noStore() });
+
+  if (request.method === "DELETE") {
+    try {
+      const result = await env.DB.prepare("DELETE FROM providers WHERE id=?1").bind(id).run();
+      if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "provider_not_found" }, { status: 404, headers: noStore() });
+      await writeAudit(env.DB, await adminActorId(env.DB, session), "provider.delete", "provider", id, session.role);
+      return Response.json({ ok: true }, { headers: noStore() });
+    } catch {
+      return Response.json({ error: "provider_in_use" }, { status: 409, headers: noStore() });
+    }
+  }
+
+  if (request.method !== "POST" && request.method !== "PUT") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
+  const body = await request.json<{name?:unknown;adapterType?:unknown;endpoint?:unknown;enabled?:unknown}>();
+  if (typeof body.name !== "string" || body.name.trim().length === 0 || body.name.length > 160) return Response.json({ error: "invalid_provider_name" }, { status: 400, headers: noStore() });
+  if (typeof body.adapterType !== "string" || body.adapterType.trim().length === 0 || body.adapterType.length > 80) return Response.json({ error: "invalid_adapter_type" }, { status: 400, headers: noStore() });
+  if (typeof body.endpoint !== "string" || body.endpoint.length > 2048) return Response.json({ error: "invalid_endpoint" }, { status: 400, headers: noStore() });
+  const enabled = body.enabled === false ? 0 : 1;
+  if (request.method === "POST") {
+    await env.DB.prepare("INSERT INTO providers (id,name,adapter_type,endpoint,enabled,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?6)")
+      .bind(id, body.name.trim(), body.adapterType.trim(), body.endpoint, enabled, new Date().toISOString()).run();
+  } else {
+    const result = await env.DB.prepare("UPDATE providers SET name=?2,adapter_type=?3,endpoint=?4,enabled=?5,updated_at=?6 WHERE id=?1")
+      .bind(id, body.name.trim(), body.adapterType.trim(), body.endpoint, enabled, new Date().toISOString()).run();
+    if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "provider_not_found" }, { status: 404, headers: noStore() });
+  }
+  await writeAudit(env.DB, await adminActorId(env.DB, session), request.method === "POST" ? "provider.create" : "provider.update", "provider", id, session.role);
+  return Response.json({ ok: true, id }, { headers: noStore() });
 }
 async function roles(env: Env, request: Request, session: AdminSession, segments: string[]) {
   if (request.method === "GET") {
