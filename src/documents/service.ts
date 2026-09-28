@@ -4,7 +4,7 @@ import { getSystemConfig, getSystemConfigInt } from "../config";
 import { createOperation } from "../operations/service";
 import { enqueueHeavyJob } from "../queue/producer";
 import { reservePoints, releaseReservation, settleReservation } from "../billing/points";
-import { createAIGateway, type AIGateway } from "../ai-gateway";
+import type { AIGateway } from "../ai-gateway";
 import { resolveModel } from "../models/registry";
 import { getTelegramFile, downloadTelegramFile, sendTelegramMessage, TelegramApiError } from "../telegram/api";
 import { chunkDocumentText, extractDocument, rankChunks } from "./extract";
