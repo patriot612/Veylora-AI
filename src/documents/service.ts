@@ -71,7 +71,7 @@ export async function processDocumentUploadJob(
   if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) return { ok: true };
   if (operation.telegram_delivery_status === "sent" && operation.temporary_result_ref) return { ok: true };
 
-  const existingSessionId = operation.temporary_result_ref ?? null;
+  let uploadSessionId = operation.temporary_result_ref ?? null;
   const fileId = stringValue(message.metadata?.fileId);
   const fileType = stringValue(message.metadata?.fileType) as "pdf" | "docx" | "txt" | undefined;
   const chatId = numberValue(message.metadata?.chatId);
@@ -81,11 +81,13 @@ export async function processDocumentUploadJob(
   }
 
   try {
-    if (!existingSessionId) {
+    if (!uploadSessionId) {
       await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "processing", now: deps.now() });
     } else {
       await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "processing", now: deps.now() });
-      await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "delivering", now: deps.now() });
+      uploadSessionId = sessionId;
+
+    await transitionOperation(deps.db, { operationId: message.operationId, userId: message.userId, to: "delivering", now: deps.now() });
       await sendTelegramMessage(deps.botToken, chatId, "Документ готов. Задайте вопрос по содержимому.", {}, deps.fetchImpl ?? fetch);
       await deps.db.prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(message.operationId, message.userId).run();
       return { ok: true };
@@ -120,8 +122,8 @@ export async function processDocumentUploadJob(
   } catch (error) {
     if (error instanceof TelegramApiError && error.retryable) return { ok: false, retryable: true, code: "telegram_document_delivery_retry" };
     if (error instanceof Error && /timeout|temporary|5\\d\\d/i.test(error.message)) return { ok: false, retryable: true, code: error.message };
-    if (operation.model_id === null && operation.temporary_result_ref) {
-      await cleanupDocumentUploadSession(deps.db, message.userId, operation.temporary_result_ref);
+    if (operation.model_id === null && uploadSessionId) {
+      await cleanupDocumentUploadSession(deps.db, message.userId, uploadSessionId);
     }
     return { ok: false, retryable: false, code: error instanceof Error ? error.message : "document_upload_failed" };
   }
