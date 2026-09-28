@@ -188,11 +188,16 @@ export async function setChatModel(
   ).bind(modelId).first<{ id: string }>();
   if (!model) return false;
 
-  const result = await db.prepare(
-    "UPDATE users SET active_chat_model_id=?2,active_role_id=NULL,updated_at=?3 WHERE id=?1",
-  ).bind(userId, modelId, now).run();
+  const result = await db.batch([
+    db.prepare(
+      "UPDATE users SET active_chat_model_id=?2,active_role_id=NULL,updated_at=?3 WHERE id=?1",
+    ).bind(userId, modelId, now),
+    db.prepare(
+      "UPDATE conversations SET role_id=NULL,updated_at=?3 WHERE id=(SELECT active_conversation_id FROM users WHERE id=?1) AND user_id=?1 AND archived_at IS NULL AND deleted_at IS NULL",
+    ).bind(userId, now),
+  ]);
 
-  return (result.meta.changes ?? 0) === 1;
+  return (result[0].meta.changes ?? 0) === 1;
 }
 
 export async function setConversationRole(
