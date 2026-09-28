@@ -95,7 +95,7 @@ async function users(env: Env, request: Request, session: AdminSession, segments
 
 async function models(env: Env, request: Request, session: AdminSession, segments: string[]) {
   if (request.method === "GET") {
-    const rows = await env.DB.prepare("SELECT m.id,m.display_name,m.type,m.points_cost,m.subscription_only,m.enabled,m.provider_model_id,f.name AS family_name,p.name AS provider_name,c.name AS credential_name FROM models m JOIN families f ON f.id=m.family_id JOIN providers p ON p.id=m.provider_id JOIN credentials c ON c.id=m.credential_id ORDER BY m.type,m.display_name").all();
+    const rows = await env.DB.prepare("SELECT m.id,m.display_name,m.type,m.points_cost,m.subscription_only,m.enabled,m.provider_model_id,f.name AS family_name FROM models m JOIN families f ON f.id=m.family_id ORDER BY m.type,m.display_name").all();
     return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
   }
   assertPermission(session, "models.write");
