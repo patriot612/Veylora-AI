@@ -137,8 +137,8 @@ export async function settleSuccessfulPayment(input: {
   if (!order) return { error: "order_not_found" };
   if (order.status === "paid") {
     const existing = await input.db
-      .prepare("SELECT id FROM subscriptions WHERE user_id=?1 ORDER BY created_at DESC LIMIT 1")
-      .bind(order.user_id)
+      .prepare("SELECT id FROM subscriptions WHERE user_id=?1 AND plan_id=?2 AND status='active' ORDER BY created_at DESC LIMIT 1")
+      .bind(order.user_id, order.plan_id)
       .first<{ id: string }>();
     return existing
       ? { orderId, subscriptionId: existing.id, duplicate: true }
