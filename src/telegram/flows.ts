@@ -5,7 +5,7 @@ import { createPlanInvoice } from "../payments/service";
 import { handleImageRequest } from "../image/service";
 import { enterDocumentsMode } from "../documents/service";
 import { enterVoiceMode } from "../voice/service";
-import { answerTelegramCallbackQuery, sendTelegramMessage } from "./api";
+import { answerTelegramCallbackQuery, editTelegramMessage, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
 import { getUserLocale, LANGUAGE_LABELS, t } from "../i18n";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
@@ -551,6 +551,7 @@ export async function handleSearchText(
   if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
   const prefs = await getUiPreferences(env.DB, userId);
   const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
+  const status = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(await getUserLocale(env.DB, userId), "search.processing")).catch(() => null);
   const outcome = await executeSearch({
     db: env.DB,
     gateway,
@@ -562,28 +563,38 @@ export async function handleSearchText(
     searxngUrl: env.SEARXNG_URL,
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
   });
-  await deliverSearchOutcome(env, userId, chatId, outcome);
+  await deliverSearchOutcome(env, userId, chatId, outcome, status?.message_id);
   return true;
 }
 
-async function deliverSearchOutcome(env: Env, userId: string, chatId: number, outcome: SearchOutcome): Promise<void> {
+async function deliverSearchOutcome(env: Env, userId: string, chatId: number, outcome: SearchOutcome, statusMessageId?: number): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+  const locale = await getUserLocale(env.DB, userId);
   if (outcome.kind === "answered") {
     let telegramDelivered = false;
     try {
-      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
+      if (statusMessageId) {
+        await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, outcome.text);
+      } else {
+        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
+      }
       telegramDelivered = true;
       if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");
     } catch (error) {
       if (!telegramDelivered) {
         await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(await getUserLocale(env.DB, userId), "search.deliveryFailed")).catch(() => false);
+        if (statusMessageId) {
+          await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, t(locale, "search.deliveryFailed")).catch(() => false);
+        } else {
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(locale, "search.deliveryFailed")).catch(() => false);
+        }
       }
     }
     return;
   }
-  const message = outcome.kind === "no_result" ? t(await getUserLocale(env.DB, userId), "search.noResult") : outcome.kind === "insufficient_points" ? t(await getUserLocale(env.DB, userId), "billing.insufficient") : t(await getUserLocale(env.DB, userId), "search.failed");
-  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
+  const message = outcome.kind === "no_result" ? t(locale, "search.noResult") : outcome.kind === "insufficient_points" ? t(locale, "billing.insufficient") : t(locale, "search.failed");
+  if (statusMessageId) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, message).catch(() => false);
+  else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
 }
 
 async function isAdminTelegramUser(env: Env, telegramUserId: number): Promise<boolean> {
