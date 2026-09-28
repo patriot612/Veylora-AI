@@ -9,7 +9,7 @@ type Message = string | ((vars: Vars) => string);
 const messages: Record<Locale, Record<string, Message>> = {
   ru: {
     "common.back": "← Назад",
-    "menu.chat": "💬 Чат", "menu.image": "🎨 Изображения", "menu.model": "🤖 Сменить модель", "menu.dialogs": "📖 Мои диалоги", "menu.tools": "🧰 Инструменты", "menu.account": "👤 Аккаунт", "menu.search": "🔎 Поиск", "menu.documents": "📄 Документы", "menu.roles": "🎭 Роли",
+    "menu.chat": "💬 Чат", "menu.newDialog": "➕ Новый диалог", "menu.image": "🎨 Изображения", "menu.model": "🤖 Сменить модель", "menu.dialogs": "📖 Мои диалоги", "menu.tools": "🧰 Инструменты", "menu.account": "👤 Аккаунт", "menu.search": "🔎 Поиск", "menu.documents": "📄 Документы", "menu.roles": "🎭 Роли",
     "account.plans": "Подписка и баллы", "account.orders": "Мои заказы", "language.self": "Русский",
     "common.toChat": "💬 В чат",
     "common.toAccount": "← К аккаунту",
@@ -51,7 +51,7 @@ const messages: Record<Locale, Record<string, Message>> = {
   },
   en: {
     "common.back": "← Back",
-    "menu.chat": "💬 Chat", "menu.image": "🎨 Images", "menu.model": "🤖 Change model", "menu.dialogs": "📖 My dialogs", "menu.tools": "🧰 Tools", "menu.account": "👤 Account", "menu.search": "🔎 Search", "menu.documents": "📄 Documents", "menu.roles": "🎭 Roles",
+    "menu.chat": "💬 Chat", "menu.newDialog": "➕ Neuer Dialog", "menu.newDialog": "➕ Nouveau dialogue", "menu.newDialog": "➕ Yangi dialog", "menu.newDialog": "➕ New dialog", "menu.image": "🎨 Images", "menu.model": "🤖 Change model", "menu.dialogs": "📖 My dialogs", "menu.tools": "🧰 Tools", "menu.account": "👤 Account", "menu.search": "🔎 Search", "menu.documents": "📄 Documents", "menu.roles": "🎭 Roles",
     "account.plans": "Plans & points", "account.orders": "My orders", "language.self": "English",
     "common.toChat": "💬 Chat",
     "common.toAccount": "← Account",
