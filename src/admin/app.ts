@@ -114,12 +114,27 @@ async function addCredential(id){
  await api("providers/"+encodeURIComponent(id)+"/credentials/"+crypto.randomUUID(),{method:"POST",body:JSON.stringify({name,secret,enabled:true})});
  await render("providers");
 }
+async function createRole(){
+ const name=prompt("Role name"); if(!name) return;
+ const description=prompt("Description","")||"";
+ const systemPrompt=prompt("System prompt"); if(!systemPrompt) return;
+ await api("roles",{method:"POST",body:JSON.stringify({name,description,systemPrompt,enabled:true})});
+ await render("roles");
+}
 async function editRole(id){
  const name=prompt("Role name"); if(!name) return;
  const description=prompt("Description","")||"";
  const systemPrompt=prompt("System prompt"); if(!systemPrompt) return;
  await api("roles/"+encodeURIComponent(id),{method:"PUT",body:JSON.stringify({name,description,systemPrompt,enabled:true})});
  await render("roles");
+}
+async function createTemplate(){
+ const name=prompt("Template name"); if(!name) return;
+ const description=prompt("Description","")||"";
+ const promptTemplate=prompt("Prompt template","{{prompt}}"); if(!promptTemplate) return;
+ const extraPointsCost=Number(prompt("Extra points cost","0")||"0");
+ await api("templates",{method:"POST",body:JSON.stringify({name,description,promptTemplate,extraPointsCost,enabled:true})});
+ await render("templates");
 }
 async function editTemplate(id){
  const name=prompt("Template name"); if(!name) return;
@@ -164,8 +179,10 @@ app.addEventListener("click",async(event)=>{
   if(action==="new-provider") return createProvider();
   if(action==="edit-provider") return editProvider(id);
   if(action==="add-credential") return addCredential(id);
+  if(action==="new-role") return createRole();
   if(action==="edit-role") return editRole(id);
   if(action==="delete-role") return deleteRole(id);
+  if(action==="new-template") return createTemplate();
   if(action==="edit-template") return editTemplate(id);
   if(action==="edit-plan") return editPlan(id);
   if(action==="refund") return refundOrder(id);
