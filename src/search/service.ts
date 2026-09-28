@@ -13,7 +13,7 @@ export type SearchOutcome =
   | { kind: "failed"; operationId: string; code: string };
 export type SearchServiceInput = {
   db: D1Database; gateway: AIGateway; userId: string; query: string; modelId?: string; telegramUpdateId?: number; now: string;
-  searxngUrl: string; credentialEncryptionKey: string; fetchImpl?: typeof fetch;
+  searxngUrl: string; searchAuthToken?: string; credentialEncryptionKey: string; fetchImpl?: typeof fetch;
 };
 
 const MAX_QUERY_CHARS = 1000;
@@ -54,7 +54,7 @@ export async function executeSearch(input: SearchServiceInput): Promise<SearchOu
   const deadline = Date.now() + Math.max(1, Math.min(5 * 60, searchTimeoutSeconds)) * 1000;
 
   try {
-    const searchConfig = await getSearchProviderConfig(input.db, input.searxngUrl);
+    const searchConfig = await getSearchProviderConfig(input.db, input.searxngUrl, input.searchAuthToken);
     const payload = await searchViaGateway(searchConfig, query, input.fetchImpl ?? fetch, Math.min(SEARXNG_TIMEOUT_MS, Math.max(1, deadline - Date.now())));
     const results = normalizeResults(payload);
     if (results.length === 0) {
