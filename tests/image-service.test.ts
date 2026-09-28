@@ -1,4 +1,4 @@
-import { env } from "./test-env";
+import { xnv } from "./test-env";
 import { describe, expect, it } from "vitest";
 import { createAIGateway } from "../src/ai-gateway";
 import { processImageJob } from "../src/image/service";
