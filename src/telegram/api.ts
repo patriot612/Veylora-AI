@@ -97,3 +97,60 @@ export async function editTelegramMessage(
     fetchImpl,
   );
 }
+
+export async function sendTelegramPhoto(
+  botToken: string,
+  chatId: number,
+  source: { url?: string; bytes?: Uint8Array; contentType?: string },
+  extra: Record<string, unknown> = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ message_id: number }> {
+  if (source.url) {
+    return telegramApi<{ message_id: number }>(
+      botToken,
+      "sendPhoto",
+      { chat_id: chatId, photo: source.url, ...extra },
+      fetchImpl,
+    );
+  }
+
+  if (!source.bytes) {
+    throw new TelegramApiError("telegram_photo_source_missing", "sendPhoto", false);
+  }
+
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined) form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  const type = source.contentType ?? "image/png";
+  form.set("photo", new File([source.bytes], "image." + (type === "image/jpeg" ? "jpg" : "png"), { type }));
+
+  const response = await fetchImpl(
+    "https://api.telegram.org/bot" + botToken + "/sendPhoto",
+    { method: "POST", body: form },
+  );
+
+  let body: TelegramResponse<{ message_id: number }> | null = null;
+  try {
+    body = await response.json() as TelegramResponse<{ message_id: number }>;
+  } catch (error) {
+    throw new TelegramApiError("telegram_invalid_response", "sendPhoto", response.status >= 500, undefined, { cause: error });
+  }
+
+  if (response.status === 429) {
+    throw new TelegramApiError(
+      body?.description ?? "telegram_rate_limited",
+      "sendPhoto",
+      true,
+      body?.parameters?.retry_after,
+    );
+  }
+  if (response.status >= 500) {
+    throw new TelegramApiError(body?.description ?? "telegram_server_error", "sendPhoto", true);
+  }
+  if (!response.ok || body?.ok !== true || !body.result) {
+    throw new TelegramApiError(body?.description ?? "telegram_request_failed", "sendPhoto", false);
+  }
+  return body.result;
+}
