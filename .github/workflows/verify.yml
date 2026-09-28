@@ -17,4 +17,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npx wrangler d1 migrations apply veylora-ai --local
+      - run: npx wrangler d1 execute veylora-ai --local --command="SELECT (SELECT COUNT(*) FROM plans) AS plans, (SELECT COUNT(*) FROM families) AS families, (SELECT COUNT(*) FROM system_config) AS config_entries;"
       - run: npx wrangler deploy --dry-run --outdir=dist
