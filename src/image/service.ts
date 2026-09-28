@@ -2,7 +2,6 @@ import { getSystemConfig } from "../config";
 import { createOperation } from "../operations/service";
 import { enqueueHeavyJob } from "../queue/producer";
 import { resolveModel } from "../models/registry";
-import { getActivePlan } from "../subscriptions";
 import type { AIGateway, GatewayImageResult } from "../ai-gateway";
 import { sendTelegramPhoto } from "../telegram/api";
 import { transitionOperation } from "../operations/service";
@@ -21,6 +20,7 @@ export type ImageRequest = {
   telegramUpdateId: number;
   chatId: number;
   now: string;
+  encryptionKey: string;
 };
 
 export type ImageQueueDeps = {
