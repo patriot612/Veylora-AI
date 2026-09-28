@@ -66,8 +66,8 @@ export async function processDocumentUploadJob(
   message: { operationId: string; userId: string; metadata?: Record<string, unknown> },
   deps: { db: D1Database; botToken: string; now: () => string; fetchImpl?: typeof fetch },
 ): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string }> {
-  const operation = await deps.db.prepare("SELECT status, temporary_result_ref, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
-    .bind(message.operationId, message.userId).first<{ status: string; temporary_result_ref: string | null; telegram_delivery_status: string }>();
+  const operation = await deps.db.prepare("SELECT status, model_id, temporary_result_ref, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
+    .bind(message.operationId, message.userId).first<{ status: string; model_id: string | null; temporary_result_ref: string | null; telegram_delivery_status: string }>();
   if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) return { ok: true };
   if (operation.telegram_delivery_status === "sent" && operation.temporary_result_ref) return { ok: true };
 
@@ -120,6 +120,9 @@ export async function processDocumentUploadJob(
   } catch (error) {
     if (error instanceof TelegramApiError && error.retryable) return { ok: false, retryable: true, code: "telegram_document_delivery_retry" };
     if (error instanceof Error && /timeout|temporary|5\\d\\d/i.test(error.message)) return { ok: false, retryable: true, code: error.message };
+    if (operation.model_id === null && operation.temporary_result_ref) {
+      await cleanupDocumentUploadSession(deps.db, message.userId, operation.temporary_result_ref);
+    }
     return { ok: false, retryable: false, code: error instanceof Error ? error.message : "document_upload_failed" };
   }
 }
@@ -180,6 +183,12 @@ export async function answerDocumentQuestion(input: { db: D1Database; gateway: A
 }
 
 
+
+export async function cleanupDocumentUploadSession(db: D1Database, userId: string, sessionId: string): Promise<void> {
+  await db.prepare("UPDATE users SET active_document_session_id=NULL, active_mode=CASE WHEN active_mode='documents' THEN 'chat' ELSE active_mode END, updated_at=?3 WHERE id=?1 AND active_document_session_id=?2").bind(userId, sessionId, new Date().toISOString()).run();
+  await db.prepare("DELETE FROM document_chunks WHERE session_id=?1").bind(sessionId).run();
+  await db.prepare("DELETE FROM document_sessions WHERE id=?1 AND user_id=?2").bind(sessionId, userId).run();
+}
 
 export async function completeDocumentQuestionDelivery(
   db: D1Database,
