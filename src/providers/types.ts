@@ -5,6 +5,8 @@ export type GatewayMessage = {
   content: string;
 };
 
+export type VoiceMode = "reply";
+
 export type GatewayRequest = {
   operationType: ModelType;
   providerModelId: string;
@@ -14,6 +16,8 @@ export type GatewayRequest = {
   prompt?: string;
   maxOutputTokens?: number;
   input?: ArrayBuffer;
+  inputContentType?: string;
+  voiceMode?: VoiceMode;
   config?: Record<string, unknown>;
   signal?: AbortSignal;
 };
@@ -49,4 +53,4 @@ export class ProviderGatewayError extends Error {
 export interface ProviderAdapter {
   readonly type: string;
   invoke(request: GatewayRequest): Promise<GatewayResponse>;
-};
+}
