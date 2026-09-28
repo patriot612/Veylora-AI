@@ -149,11 +149,11 @@ export async function handleTelegramCallback(
     await sendTelegramMessage(botToken, chatId, t(locale, "image.screen"), {
       reply_markup: {
         inline_keyboard: [
-          ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "image_model:" + model.id }]),
+          ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " " + t(locale, "units.points"), callback_data: "image_model:" + model.id }]),
           [{ text: t(locale, "image.size1"), callback_data: "image_size:1024x1024" }, { text: t(locale, "image.size2"), callback_data: "image_size:1536x1024" }],
           [{ text: t(locale, "image.qualityStandard"), callback_data: "image_quality:standard" }, { text: t(locale, "image.qualityHd"), callback_data: "image_quality:hd" }],
           [{ text: t(locale, "image.formatPng"), callback_data: "image_format:png" }, { text: t(locale, "image.formatWebp"), callback_data: "image_format:webp" }, { text: t(locale, "image.formatJpg"), callback_data: "image_format:jpg" }],
-          ...(templates.results ?? []).slice(0, 6).map((template: { id: string; name: string; extra_points_cost: number }) => [{ text: "📐 " + template.name + " +" + template.extra_points_cost + " б.", callback_data: "image_template:" + template.id }]),
+          ...(templates.results ?? []).slice(0, 6).map((template: { id: string; name: string; extra_points_cost: number }) => [{ text: "📐 " + template.name + " +" + template.extra_points_cost + " " + t(locale, "units.points"), callback_data: "image_template:" + template.id }]),
           [{ text: t(locale, "common.toChat"), callback_data: "menu:chat" }],
         ],
       },
@@ -209,7 +209,7 @@ export async function handleTelegramCallback(
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.imageSize = data.slice("image_size:".length);
     await setUiPreferences(env.DB, userId, prefs);
-    await sendTelegramMessage(botToken, chatId, "Размер сохранён.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.sizeSaved"));
     return true;
   }
 
@@ -217,7 +217,7 @@ export async function handleTelegramCallback(
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.imageQuality = data.slice("image_quality:".length);
     await setUiPreferences(env.DB, userId, prefs);
-    await sendTelegramMessage(botToken, chatId, "Качество сохранено.");
+    await sendTelegramMessage(botToken, chatId, t(locale, "image.qualitySaved"));
     return true;
   }
 
@@ -249,7 +249,7 @@ export async function handleTelegramCallback(
     await sendTelegramMessage(botToken, chatId, models.length ? "📚 " + models[0].familyName : t(locale, "models.selectFamily"), {
       reply_markup: {
         inline_keyboard: [
-          ...models.map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "model:" + model.id }]),
+          ...models.map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " " + t(locale, "units.points"), callback_data: "model:" + model.id }]),
           [{ text: t(locale, "models.backToFamilies"), callback_data: "menu:model" }],
         ],
       },
@@ -287,11 +287,11 @@ export async function handleTelegramCallback(
 
   if (data === "dialogs:archive") {
     const dialogs = await listArchivedConversations(env.DB, userId);
-    await sendTelegramMessage(botToken, chatId, "🗄 Архив", {
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.archiveTitle"), {
       reply_markup: {
         inline_keyboard: [
           ...dialogs.slice(0, 10).map((dialog) => [{ text: dialog.title.slice(0, 40), callback_data: "dialog:restore:" + dialog.id }, { text: "🗑", callback_data: "dialog:delete:" + dialog.id }]),
-          [{ text: "← Диалоги", callback_data: "menu:dialogs" }],
+          [{ text: t(locale, "dialogs.back"), callback_data: "menu:dialogs" }],
         ],
       },
     });
@@ -302,7 +302,7 @@ export async function handleTelegramCallback(
     const plan = await getActivePlan(env.DB, userId, now);
     const expiresAt = new Date(Date.parse(now) + (plan?.retentionHours ?? 24) * 3_600_000).toISOString();
     try {
-      await createNewConversation(env.DB, { userId, title: "Новый диалог", now, expiresAt });
+      await createNewConversation(env.DB, { userId, title: t(locale, "menu.newDialog"), now, expiresAt });
       await setMode(env.DB, userId, "chat", now);
       await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.newCreated"), { reply_markup: mainMenuKeyboard(false, locale) });
     } catch {
@@ -425,7 +425,7 @@ export async function handleTelegramCallback(
     await sendTelegramMessage(botToken, chatId, "🔎 " + (models[0]?.familyName ?? t(locale, "models.selectFamily")), {
       reply_markup: {
         inline_keyboard: [
-          ...models.map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "search_model:" + model.id }]),
+          ...models.map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " " + t(locale, "units.points"), callback_data: "search_model:" + model.id }]),
           [{ text: t(locale, "models.backToFamilies"), callback_data: "tool:search" }],
         ],
       },
