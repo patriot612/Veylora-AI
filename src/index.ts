@@ -18,7 +18,6 @@ import { renderAdminApp } from "./admin/app";
 import { handleAdminApi } from "./admin/api";
 import { validateMiniAppInitData } from "./admin/auth";
 import { loadAdminSession } from "./admin/rbac";
-import { consumeUserRateLimit } from "./security/rate-limit";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -70,21 +69,14 @@ export default {
         const user = envelope.user ? await upsertTelegramUser(env.DB, envelope.user, now) : null;
         const claim = await claimTelegramUpdate(env.DB, envelope.update_id, user?.id ?? null, now);
         if (claim.duplicate) return jsonResponse({ ok: true, duplicate: true });
+        if (claim.rateLimited) {
+          if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Слишком много запросов. Попробуйте немного позже.").catch(() => false);
+          }
+          return jsonResponse({ ok: true, rate_limited: true });
+        }
         await markTelegramUpdate(env.DB, envelope.update_id, "processing", now);
         if (!user) { await markTelegramUpdate(env.DB, envelope.update_id, "ignored", now, "user_not_found"); return jsonResponse({ ok: true, ignored: true }); }
-
-        if (["command", "text", "document", "voice", "photo"].includes(envelope.kind)) {
-          const limit = await getSystemConfig(env.DB, "limits.telegram_updates_per_minute");
-          const maxRequests = Number.parseInt(limit ?? "30", 10);
-          const rate = await consumeUserRateLimit(env.DB, user.id, now, Number.isFinite(maxRequests) && maxRequests > 0 ? maxRequests : 30);
-          if (!rate.allowed) {
-            await markTelegramUpdate(env.DB, envelope.update_id, "ignored", now, "rate_limited");
-            if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
-              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "Слишком много запросов. Попробуйте немного позже.").catch(() => false);
-            }
-            return jsonResponse({ ok: true, rate_limited: true });
-          }
-        }
 
         if (envelope.kind === "pre_checkout" && envelope.preCheckout && envelope.user) {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
