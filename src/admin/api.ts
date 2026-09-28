@@ -121,15 +121,83 @@ async function users(env: Env, request: Request, session: AdminSession, segments
 }
 
 async function models(env: Env, request: Request, session: AdminSession, segments: string[]) {
+  if (request.method === "GET" && segments[0] === "options") {
+    const [families, providers, credentials] = await Promise.all([
+      env.DB.prepare("SELECT id,name FROM families WHERE enabled=1 ORDER BY sort_order,name").all(),
+      env.DB.prepare("SELECT id,name,enabled FROM providers ORDER BY name").all(),
+      env.DB.prepare("SELECT id,provider_id,name,enabled FROM credentials ORDER BY name").all(),
+    ]);
+    return Response.json({ ok: true, families: families.results ?? [], providers: providers.results ?? [], credentials: credentials.results ?? [] }, { headers: noStore() });
+  }
+
   if (request.method === "GET") {
-    const rows = await env.DB.prepare("SELECT m.id,m.display_name,m.type,m.points_cost,m.subscription_only,m.enabled,m.provider_model_id,f.name AS family_name FROM models m JOIN families f ON f.id=m.family_id ORDER BY m.type,m.display_name").all();
+    const rows = await env.DB.prepare("SELECT m.id,m.display_name,m.type,m.points_cost,m.subscription_only,m.enabled,m.provider_model_id,f.name AS family_name,m.context_window,m.max_output_tokens,m.capabilities FROM models m JOIN families f ON f.id=m.family_id ORDER BY m.type,m.display_name").all();
     return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
   }
+
   assertPermission(session, "models.write");
   const modelId = segments[0] ?? "";
+
+  if (request.method === "DELETE") {
+    if (!modelId) return Response.json({ error: "model_id_required" }, { status: 400, headers: noStore() });
+    try {
+      const result = await env.DB.prepare("DELETE FROM models WHERE id=?1").bind(modelId).run();
+      if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "model_not_found" }, { status: 404, headers: noStore() });
+      await writeAudit(env.DB, await adminActorId(env.DB, session), "model.delete", "model", modelId, session.role);
+      return Response.json({ ok: true }, { headers: noStore() });
+    } catch {
+      return Response.json({ error: "model_in_use" }, { status: 409, headers: noStore() });
+    }
+  }
+
+  const body = await request.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+
+  if (request.method === "POST") {
+    const requiredString = (value: unknown, errorCode: string, max = 200) => {
+      if (typeof value !== "string" || value.trim().length === 0 || value.length > max) throw new Error(errorCode);
+      return value.trim();
+    };
+    try {
+      const id = requiredString(body.id ?? crypto.randomUUID(), "invalid_model_id");
+      const familyId = requiredString(body.familyId, "invalid_family_id", 100);
+      const providerId = requiredString(body.providerId, "invalid_provider_id", 100);
+      const credentialId = requiredString(body.credentialId, "invalid_credential_id", 100);
+      const providerModelId = requiredString(body.providerModelId, "invalid_provider_model_id", 300);
+      const displayName = requiredString(body.displayName, "invalid_display_name");
+      const type = requiredString(body.type, "invalid_type", 20);
+      if (!["chat","search","image","voice"].includes(type)) throw new Error("invalid_type");
+      const pointsCost = Number(body.pointsCost);
+      if (!Number.isSafeInteger(pointsCost) || pointsCost < 0) throw new Error("invalid_points_cost");
+      const subscriptionOnly = body.subscriptionOnly === true ? 1 : body.subscriptionOnly === false ? 0 : Number(body.subscriptionOnly ?? 0);
+      const enabled = body.enabled === false ? 0 : 1;
+      const contextWindow = body.contextWindow === undefined ? null : Number(body.contextWindow);
+      const maxOutputTokens = body.maxOutputTokens === undefined ? null : Number(body.maxOutputTokens);
+      if (contextWindow !== null && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)) throw new Error("invalid_context_window");
+      if (maxOutputTokens !== null && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0)) throw new Error("invalid_max_output_tokens");
+      const capabilities = typeof body.capabilities === "string" ? body.capabilities : JSON.stringify(body.capabilities ?? {});
+      const config = typeof body.config === "string" ? body.config : JSON.stringify(body.config ?? {});
+      const family = await env.DB.prepare("SELECT id FROM families WHERE id=?1 AND enabled=1").bind(familyId).first();
+      const provider = await env.DB.prepare("SELECT id FROM providers WHERE id=?1 AND enabled=1").bind(providerId).first();
+      const credential = await env.DB.prepare("SELECT id FROM credentials WHERE id=?1 AND provider_id=?2 AND enabled=1").bind(credentialId, providerId).first();
+      if (!family) return Response.json({ error: "family_not_found" }, { status: 404, headers: noStore() });
+      if (!provider) return Response.json({ error: "provider_not_found" }, { status: 404, headers: noStore() });
+      if (!credential) return Response.json({ error: "credential_not_found" }, { status: 404, headers: noStore() });
+      await env.DB.prepare("INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15)")
+        .bind(id,familyId,providerId,credentialId,providerModelId,displayName,type,pointsCost,subscriptionOnly,contextWindow,maxOutputTokens,capabilities,enabled,config,now).run();
+      await writeAudit(env.DB, await adminActorId(env.DB, session), "model.create", "model", id, session.role);
+      return Response.json({ ok: true, id }, { headers: noStore() });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "model_create_failed";
+      if (message.startsWith("invalid_")) return Response.json({ error: message }, { status: 400, headers: noStore() });
+      if (message.includes("UNIQUE")) return Response.json({ error: "model_id_conflict" }, { status: 409, headers: noStore() });
+      throw error;
+    }
+  }
+
   if (!modelId) return Response.json({ error: "model_id_required" }, { status: 400, headers: noStore() });
   if (request.method !== "PUT") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
-  const body = await request.json<Record<string, unknown>>();
+
   const updates: string[] = [];
   const bindings: unknown[] = [];
   const assign = (column: string, value: unknown) => { updates.push(column + "=?"+(bindings.length + 1)); bindings.push(value); };
@@ -152,6 +220,10 @@ async function models(env: Env, request: Request, session: AdminSession, segment
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0 || body.displayName.length > 200) return Response.json({ error: "invalid_display_name" }, { status: 400, headers: noStore() });
     assign("display_name", body.displayName.trim());
   }
+  if ("providerModelId" in body) {
+    if (typeof body.providerModelId !== "string" || body.providerModelId.trim().length === 0 || body.providerModelId.length > 300) return Response.json({ error: "invalid_provider_model_id" }, { status: 400, headers: noStore() });
+    assign("provider_model_id", body.providerModelId.trim());
+  }
   if ("contextWindow" in body) {
     const value = Number(body.contextWindow);
     if (!Number.isSafeInteger(value) || value <= 0) return Response.json({ error: "invalid_context_window" }, { status: 400, headers: noStore() });
@@ -162,9 +234,15 @@ async function models(env: Env, request: Request, session: AdminSession, segment
     if (!Number.isSafeInteger(value) || value <= 0) return Response.json({ error: "invalid_max_output_tokens" }, { status: 400, headers: noStore() });
     assign("max_output_tokens", value);
   }
+  if ("capabilities" in body) {
+    assign("capabilities", typeof body.capabilities === "string" ? body.capabilities : JSON.stringify(body.capabilities ?? {}));
+  }
+  if ("config" in body) {
+    assign("config", typeof body.config === "string" ? body.config : JSON.stringify(body.config ?? {}));
+  }
   if (!updates.length) return Response.json({ error: "no_changes" }, { status: 400, headers: noStore() });
   updates.push("updated_at=?"+(bindings.length + 1));
-  bindings.push(new Date().toISOString());
+  bindings.push(now);
   const result = await env.DB.prepare("UPDATE models SET " + updates.join(",") + " WHERE id=?"+(bindings.length + 1)).bind(...bindings, modelId).run();
   if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "model_not_found" }, { status: 404, headers: noStore() });
   await writeAudit(env.DB, await adminActorId(env.DB, session), "model.update", "model", modelId, session.role);
