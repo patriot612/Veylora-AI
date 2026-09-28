@@ -434,6 +434,34 @@ export async function handleTelegramCallback(
   return false;
 }
 
+export async function handleDialogRenameText(
+  env: Env,
+  userId: string,
+  chatId: number,
+  text: string,
+  now: string,
+): Promise<boolean> {
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+  const prefs = await getUiPreferences(env.DB, userId);
+  const conversationId = typeof prefs.renameConversationId === "string" ? prefs.renameConversationId : "";
+  if (!conversationId) {
+    await setMode(env.DB, userId, "chat", now);
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Не удалось определить диалог.", { reply_markup: mainMenuKeyboard(false) });
+    return true;
+  }
+  const ok = await renameConversation(env.DB, userId, conversationId, text, now);
+  delete prefs.renameConversationId;
+  await setUiPreferences(env.DB, userId, prefs);
+  await setMode(env.DB, userId, "chat", now);
+  await sendTelegramMessage(
+    env.TELEGRAM_BOT_TOKEN,
+    chatId,
+    ok ? "Диалог переименован." : "Не удалось переименовать диалог.",
+    { reply_markup: mainMenuKeyboard(false) },
+  );
+  return true;
+}
+
 export async function handleImageText(
   env: Env,
   userId: string,
