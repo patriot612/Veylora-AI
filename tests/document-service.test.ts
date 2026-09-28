@@ -98,6 +98,38 @@ describe("document service", () => {
     expect(sendCalls).toBe(1);
   });
 
+  it("cleans up the session on terminal Telegram delivery failure", async () => {
+    const { userId } = await seedUser();
+    const { queue } = queueMock();
+    const upload = await enqueueDocumentUpload({
+      db: env.DB, queue, userId, fileId: "file-terminal", fileName: "report.txt",
+      mimeType: "text/plain", chatId: 123, now: "2026-09-28T12:00:00Z",
+    });
+    if (!("operationId" in upload)) throw new Error("missing operation");
+
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: "docs/report.txt" } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("/file/bot")) return new Response(new TextEncoder().encode("terminal failure document"), { status: 200, headers: { "content-type": "text/plain" } });
+      if (url.includes("/sendMessage")) return new Response(JSON.stringify({ ok: false, description: "Forbidden" }), { status: 403, headers: { "content-type": "application/json" } });
+      throw new Error("unexpected " + url);
+    };
+
+    const result = await processDocumentUploadJob(
+      { operationId: upload.operationId, userId, metadata: { fileId: "file-terminal", fileType: "txt", chatId: 123 } },
+      { db: env.DB, botToken: "bot", now: () => "2026-09-28T12:01:00Z", fetchImpl },
+    );
+    expect(result).toEqual({ ok: false, retryable: false, code: "Forbidden" });
+
+    const user = await env.DB.prepare("SELECT active_document_session_id,active_mode FROM users WHERE id=?1").bind(userId).first<{active_document_session_id:string|null;active_mode:string}>();
+    const sessionCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM document_sessions WHERE user_id=?1").bind(userId).first<{count:number}>();
+    const chunkCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM document_chunks WHERE session_id IN (SELECT id FROM document_sessions WHERE user_id=?1)").bind(userId).first<{count:number}>();
+    expect(user?.active_document_session_id).toBeNull();
+    expect(user?.active_mode).toBe("chat");
+    expect(sessionCount?.count).toBe(0);
+    expect(chunkCount?.count).toBe(0);
+  });
+
   it("answers document questions from top-ranked excerpts and settles the question charge", async () => {
     const { userId, modelId } = await seedUser();
     const sessionId = crypto.randomUUID();
