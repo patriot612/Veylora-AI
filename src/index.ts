@@ -6,7 +6,7 @@ import { completeSearchDelivery, executeSearch, releaseSearchDelivery } from "./
 import { claimTelegramUpdate, markTelegramUpdate, upsertTelegramUser } from "./db/telegram";
 import { hasValidWebhookSecret, isTelegramWebhookPath, jsonResponse } from "./http";
 import { editTelegramMessage, sendTelegramMessage } from "./telegram/api";
-import { handleImageText, handleSearchText, handleStartCommand, handleTelegramCallback } from "./telegram/flows";
+import { handleDialogRenameText, handleImageText, handleSearchText, handleStartCommand, handleTelegramCallback } from "./telegram/flows";
 import { classifyTelegramUpdate } from "./telegram/router";
 import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
@@ -112,7 +112,9 @@ export default {
         }
         if (envelope.kind === "text" && typeof envelope.text === "string" && typeof envelope.chat_id === "number" && typeof envelope.message_id === "number") {
           const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
-          if (activeMode?.active_mode === "image") {
+          if (activeMode?.active_mode === "dialog_rename") {
+            await handleDialogRenameText(env, user.id, envelope.chat_id, envelope.text, now);
+          } else if (activeMode?.active_mode === "image") {
             await handleImageText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
           } else if (activeMode?.active_mode === "search") {
             await handleSearchText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
