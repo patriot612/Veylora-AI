@@ -59,7 +59,7 @@ export default {
           const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
           if (activeMode?.active_mode === "voice") {
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
-            await handleVoiceTextWhileActive(env.DB, user.id, env.TELEGRAM_BOT_TOKEN, envelope.chat_id, env, env.TELEGRAM_BOT_TOKEN);
+            await handleVoiceTextWhileActive(env.TELEGRAM_BOT_TOKEN, envelope.chat_id);
           } else {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("telegram_chat_runtime_secrets_missing");
           const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
@@ -157,4 +157,8 @@ function extractMessageText(update: Record<string, unknown>): string | undefined
   if (typeof message !== "object" || message === null || Array.isArray(message)) return undefined;
   const text = (message as Record<string, unknown>).text;
   return typeof text === "string" ? text : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
