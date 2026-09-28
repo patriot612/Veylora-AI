@@ -93,6 +93,32 @@ describe("Search Mode", () => {
     }
   });
 
+  it("shows at most five sources while grounding the editor with up to eight", async () => {
+    const { userId, modelId } = await seedSearchUser();
+    const manyResults = Array.from({ length: 8 }, (_, index) => ({
+      title: "Result " + (index + 1),
+      url: "https://example.com/result-" + (index + 1),
+      content: "Useful evidence " + (index + 1),
+    }));
+    const result = await executeSearch({
+      db: env.DB,
+      gateway: gateway(modelId, "success"),
+      userId,
+      query: "many sources",
+      telegramUpdateId: 20008,
+      now: "2026-09-28T12:00:00Z",
+      searxngUrl: "https://search.example",
+      credentialEncryptionKey: key,
+      fetchImpl: async () => new Response(JSON.stringify({ results: manyResults }), { status: 200 }),
+    });
+    expect(result.kind).toBe("answered");
+    if (result.kind === "answered") {
+      expect(result.sources).toHaveLength(5);
+      expect(result.text).toContain("[5] Result 5");
+      expect(result.text).not.toContain("[6] Result 6");
+    }
+  });
+
   it("releases points when SearXNG returns no useful results", async () => {
     const { userId, modelId } = await seedSearchUser(50, 6);
     const result = await executeSearch({ db: env.DB, gateway: gateway(modelId, "success"), userId, query: "none", telegramUpdateId: 20002, now: "2026-09-28T12:00:00Z", searxngUrl: "https://search.example", credentialEncryptionKey: key, fetchImpl: async () => new Response(JSON.stringify({ results: [] })) });
