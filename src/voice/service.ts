@@ -139,7 +139,12 @@ export async function processVoiceJob(
     return { ok: true };
   } catch (error) {
     if (error instanceof TelegramApiError && error.retryable) {
-      return { ok: false, retryable: true, code: "telegram_voice_delivery_retry" };
+      return {
+        ok: false,
+        retryable: true,
+        code: "telegram_voice_delivery_retry",
+        ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+      };
     }
     if (error instanceof ProviderGatewayError && error.retryable) {
       return { ok: false, retryable: true, code: error.code };
