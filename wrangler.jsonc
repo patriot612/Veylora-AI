@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "veylora-ai",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "9adcc659-4c40-4a4a-be89-00f6921647f9",
       "migrations_dir": "migrations"
     }
   ],
