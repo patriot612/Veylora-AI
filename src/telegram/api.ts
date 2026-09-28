@@ -228,3 +228,71 @@ export async function sendTelegramVoice(
   if (!response.ok || body?.ok !== true || !body.result) throw new TelegramApiError(body?.description ?? "telegram_request_failed", "sendVoice", false);
   return body.result;
 }
+
+export async function sendTelegramInvoice(
+  botToken: string,
+  chatId: number,
+  invoice: {
+    title: string;
+    description: string;
+    payload: string;
+    currency: "XTR";
+    amount: number;
+    startParameter?: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ message_id: number }> {
+  return telegramApi<{ message_id: number }>(
+    botToken,
+    "sendInvoice",
+    {
+      chat_id: chatId,
+      title: invoice.title,
+      description: invoice.description,
+      payload: invoice.payload,
+      currency: invoice.currency,
+      prices: [{ label: invoice.title, amount: invoice.amount }],
+      ...(invoice.startParameter ? { start_parameter: invoice.startParameter } : {}),
+      provider_token: "",
+    },
+    fetchImpl,
+  );
+}
+
+export async function answerPreCheckoutQuery(
+  botToken: string,
+  preCheckoutQueryId: string,
+  ok: boolean,
+  errorMessage?: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  await telegramApi(
+    botToken,
+    "answerPreCheckoutQuery",
+    {
+      pre_checkout_query_id: preCheckoutQueryId,
+      ok,
+      ...(ok ? {} : { error_message: errorMessage ?? "Payment validation failed." }),
+    },
+    fetchImpl,
+  );
+  return true;
+}
+
+export async function refundTelegramStarPayment(
+  botToken: string,
+  userTelegramId: number,
+  telegramPaymentChargeId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  await telegramApi(
+    botToken,
+    "refundStarPayment",
+    {
+      user_id: userTelegramId,
+      telegram_payment_charge_id: telegramPaymentChargeId,
+    },
+    fetchImpl,
+  );
+  return true;
+}
