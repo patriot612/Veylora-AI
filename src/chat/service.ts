@@ -34,7 +34,7 @@ export async function handleChatMessage(input: ChatRequest): Promise<ChatResult>
   const text = input.text.trim();
   const maxChars = await getSystemConfigInt(input.db, "limits.chat_chars", 4096);
   if (!text || text.length > maxChars) {
-    await safeEdit(input.edit, input.messageId, `Максимальная длина сообщения — ${maxChars} символов.`);
+    await safeSend(input.send, `Максимальная длина сообщения — ${maxChars} символов.`);
     return { kind: "invalid_input", retryable: false };
   }
 
