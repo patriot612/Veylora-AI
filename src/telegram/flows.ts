@@ -378,22 +378,44 @@ export async function handleTelegramCallback(
   }
 
   if (data === "account:plans") {
-    const plans = await env.DB.prepare("SELECT id,name,price_stars,daily_points,retention_hours,voice_enabled FROM plans WHERE enabled=1 ORDER BY duration_days").all<{id:string;name:string;price_stars:number;daily_points:number;retention_hours:number;voice_enabled:number}>();
-    await sendTelegramMessage(botToken, chatId, "Тарифы", {
+    const plans = await env.DB.prepare("SELECT id,name,price_stars,daily_points,retention_hours,voice_enabled,duration_days FROM plans WHERE enabled=1 ORDER BY duration_days").all<{id:string;name:string;price_stars:number;daily_points:number;retention_hours:number;voice_enabled:number;duration_days:number}>();
+    await sendTelegramMessage(botToken, chatId, t(locale, "plans.title"), {
       reply_markup: {
         inline_keyboard: [
-          ...(plans.results ?? []).map((plan) => [{ text: plan.name + " · " + plan.price_stars + " ⭐", callback_data: "plan_buy:" + plan.id }]),
-          [{ text: "← В аккаунт", callback_data: "menu:account" }],
+          ...(plans.results ?? []).map((plan) => [{ text: plan.name + " · " + plan.price_stars + " ⭐", callback_data: "plan:view:" + plan.id }]),
+          [{ text: t(locale, "common.toAccount"), callback_data: "menu:account" }],
         ],
       },
     });
     return true;
   }
 
+  if (data.startsWith("plan:view:")) {
+    const planId = data.slice("plan:view:".length);
+    const plan = await env.DB.prepare("SELECT id,name,price_stars,daily_points,retention_hours,voice_enabled,duration_days FROM plans WHERE id=?1 AND enabled=1").bind(planId).first<{id:string;name:string;price_stars:number;daily_points:number;retention_hours:number;voice_enabled:number;duration_days:number}>();
+    if (!plan) throw new Error("plan_unavailable");
+    const details = t(locale, "plans.details", { days: plan.duration_days, points: plan.daily_points, retention: plan.retention_hours, voice: plan.voice_enabled === 1 ? "on" : "off" });
+    await sendTelegramMessage(botToken, chatId, plan.name + " · " + plan.price_stars + " ⭐\n\n" + details, {
+      reply_markup: { inline_keyboard: [[{ text: t(locale, "plans.pay"), callback_data: "plan_buy:" + plan.id }],[{ text: t(locale, "common.toAccount"), callback_data: "menu:account" }]] },
+    });
+    return true;
+  }
+
   if (data === "account:orders") {
-    const orders = await env.DB.prepare("SELECT id,plan_id,status,amount,currency,created_at FROM orders WHERE user_id=?1 ORDER BY created_at DESC LIMIT 10").bind(userId).all<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string}>();
-    const text = (orders.results ?? []).map((order) => "#" + order.id.slice(0, 8) + " · " + order.plan_id + " · " + order.status + " · " + order.amount + " " + order.currency).join("\n") || "Заказов пока нет.";
-    await sendTelegramMessage(botToken, chatId, "Мои заказы\n\n" + text, { reply_markup: accountKeyboard() });
+    const orders = await env.DB.prepare("SELECT id,plan_id,status,amount,currency,created_at,paid_at,refunded_at FROM orders WHERE user_id=?1 ORDER BY created_at DESC LIMIT 10").bind(userId).all<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string;paid_at:string|null;refunded_at:string|null}>();
+    const text = (orders.results ?? []).map((order) => ({...order})).map((order) => "order:view:" + order.id).join("\n");
+    await sendTelegramMessage(botToken, chatId, "Мои заказы\n\n" + ((orders.results ?? []).length ? (orders.results ?? []).map((order) => "#" + order.id.slice(0, 8) + " · " + order.plan_id + " · " + order.status + " · " + order.amount + " " + order.currency).join("\n") : t(locale, "orders.none")), {
+      reply_markup: { inline_keyboard: [...(orders.results ?? []).slice(0, 10).map((order) => [{ text: "#" + order.id.slice(0, 8) + " · " + order.status, callback_data: "order:view:" + order.id }]), [ { text: t(locale, "common.toAccount"), callback_data: "menu:account" } ]] },
+    });
+    return true;
+  }
+
+  if (data.startsWith("order:view:")) {
+    const orderId = data.slice("order:view:".length);
+    const order = await env.DB.prepare("SELECT o.id,o.plan_id,o.status,o.amount,o.currency,o.created_at,o.paid_at,o.refunded_at,p.name AS plan_name FROM orders o JOIN plans p ON p.id=o.plan_id WHERE o.id=?1 AND o.user_id=?2").bind(orderId, userId).first<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string;paid_at:string|null;refunded_at:string|null;plan_name:string}>();
+    if (!order) throw new Error("order_not_found");
+    const text = "#" + order.id.slice(0, 8) + "\n" + order.plan_name + "\n" + order.amount + " " + order.currency + "\n" + order.status + "\n" + (order.paid_at ?? order.created_at);
+    await sendTelegramMessage(botToken, chatId, text, { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.toAccount"), callback_data: "account:orders" }]] } });
     return true;
   }
 
@@ -567,5 +589,16 @@ async function setUiPreferences(db: D1Database, userId: string, prefs: UserPrefs
 async function accountSummary(db: D1Database, userId: string, now: string): Promise<string> {
   const user = await db.prepare("SELECT daily_points_remaining,bonus_points,language FROM users WHERE id=?1").bind(userId).first<{ daily_points_remaining: number; bonus_points: number; language: string }>();
   const plan = await getActivePlan(db, userId, now);
-  return "👤 Аккаунт\n\nПодписка: " + (plan?.name ?? "Free") + "\nБаллы: " + (user?.daily_points_remaining ?? 0) + "\nБонусы: " + (user?.bonus_points ?? 0) + "\nЯзык: " + (user?.language ?? "ru");
+  const dailyLimit = plan?.dailyPoints ?? 50;
+  const local = new Date(Date.parse(now) + 3 * 60 * 60 * 1000);
+  local.setUTCHours(24, 0, 0, 0);
+  const reset = new Date(local.getTime() - 3 * 60 * 60 * 1000).toISOString();
+  const locale = user?.language ?? "ru";
+  return t(locale, "account.balance", {
+    daily: user?.daily_points_remaining ?? dailyLimit,
+    limit: dailyLimit,
+    reset,
+    purchased: 0,
+    bonus: user?.bonus_points ?? 0,
+  }) + "\n\nПодписка: " + (plan?.name ?? "Free");
 }
