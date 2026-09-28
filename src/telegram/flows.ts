@@ -513,8 +513,7 @@ export async function handleTelegramCallback(
     const orderId = data.slice("order:view:".length);
     const order = await env.DB.prepare("SELECT o.id,o.plan_id,o.status,o.amount,o.currency,o.created_at,o.paid_at,o.refunded_at,p.name AS plan_name FROM orders o JOIN plans p ON p.id=o.plan_id WHERE o.id=?1 AND o.user_id=?2").bind(orderId, userId).first<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string;paid_at:string|null;refunded_at:string|null;plan_name:string}>();
     if (!order) throw new Error("order_not_found");
-    const text = "#" + order.id.slice(0, 8) + "\n" + order.plan_name + "\n" + order.amount + " " + order.currency + "\n" + order.status + "\n" + (order.paid_at ?? order.created_at);
-    await sendTelegramMessage(botToken, chatId, text, { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.toAccount"), callback_data: "account:orders" }]] } });
+    await sendTelegramMessage(botToken, chatId, "#" + order.id.slice(0, 8) + "\n" + order.plan_name + "\n" + order.amount + " " + order.currency + "\n" + order.status + "\n" + (order.paid_at ?? order.created_at), { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.toAccount"), callback_data: "account:orders" }]] } });
     return true;
   }
 
