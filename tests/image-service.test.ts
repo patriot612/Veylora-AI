@@ -128,7 +128,7 @@ describe("image queue lifecycle", () => {
       },
     );
 
-    expect(result).toEqual({ ok: false, retryable: true, code: "telegram_delivery_retry" });
+    expect(result).toEqual({ ok: false, retryable: true, code: "telegram_delivery_retry", retryAfterSeconds: 2 });
     expect(providerCalls).toBe(0);
   });
   it("rejects oversized binary image results before Telegram delivery", async () => {
