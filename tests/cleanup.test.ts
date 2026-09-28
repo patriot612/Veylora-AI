@@ -57,4 +57,22 @@ describe("scheduled cleanup", () => {
     expect(ledger.results).toHaveLength(1);
   });
 
+  it("deletes conversation history after retention expires", async () => {
+    const userId = crypto.randomUUID();
+    const modelId = "model_gpt_5_6";
+    const conversationId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id,telegram_user_id,daily_billing_day,active_conversation_id,active_chat_model_id,created_at,updated_at) VALUES (?1,?2,'2026-09-28',?3,?4,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(userId, 980000004, conversationId, modelId),
+      env.DB.prepare("INSERT INTO conversations (id,user_id,title,model_id,created_at,updated_at,expires_at) VALUES (?1,?2,'Expired dialog',?3,'2026-09-27T00:00:00Z','2026-09-27T01:00:00Z','2026-09-27T23:59:00Z')").bind(conversationId, userId, modelId),
+      env.DB.prepare("INSERT INTO conversation_turns (id,conversation_id,user_text,assistant_text,model_id,created_at,updated_at) VALUES (?1,?2,'hello','world',?3,'2026-09-27T01:00:00Z','2026-09-27T01:00:00Z')").bind(crypto.randomUUID(), conversationId, modelId),
+    ]);
+    await worker.scheduled({ cron: "0 * * * *", scheduledTime: Date.parse("2026-09-28T00:00:00Z"), type: "scheduled", noRetry: () => undefined } as ScheduledController, env);
+    const conversation = await env.DB.prepare("SELECT id FROM conversations WHERE id=?1").bind(conversationId).first<{id:string}>();
+    const turns = await env.DB.prepare("SELECT COUNT(*) AS count FROM conversation_turns WHERE conversation_id=?1").bind(conversationId).first<{count:number}>();
+    const user = await env.DB.prepare("SELECT active_conversation_id FROM users WHERE id=?1").bind(userId).first<{active_conversation_id:string|null}>();
+    expect(conversation).toBeNull();
+    expect(turns?.count).toBe(0);
+    expect(user?.active_conversation_id).toBeNull();
+  });
+
 });
