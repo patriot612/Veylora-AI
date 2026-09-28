@@ -1,5 +1,5 @@
 import { getSystemConfig } from "../config";
-import { createOperation } from "../operations/service";
+import { createOperation, transitionOperation } from "../operations/service";
 import { enqueueHeavyJob } from "../queue/producer";
 import { resolveModel } from "../models/registry";
 import { getActivePlan } from "../subscriptions";
@@ -105,6 +105,13 @@ export async function processVoiceJob(
   if (!fileId || chatId === null) return { ok: false, retryable: false, code: "voice_payload_invalid" };
 
   try {
+    await transitionOperation(deps.db, {
+      operationId: message.operationId,
+      userId: message.userId,
+      to: "delivering",
+      now: deps.now(),
+    });
+
     const file = await getTelegramFile(deps.botToken, fileId, deps.fetchImpl ?? fetch);
     const audio = await downloadTelegramFile(deps.botToken, file.file_path, 20 * 1024 * 1024, deps.fetchImpl ?? fetch);
     const reply = await deps.gateway.generateVoiceReply({
@@ -123,6 +130,10 @@ export async function processVoiceJob(
       {},
       deps.fetchImpl ?? fetch,
     );
+    await deps.db
+      .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2")
+      .bind(message.operationId, message.userId)
+      .run();
 
     return { ok: true };
   } catch (error) {
