@@ -9,7 +9,7 @@ describe("Search Gateway", () => {
       calls.push(new URL(input.toString()).hostname + ":" + String((init?.headers as Record<string,string>)?.["x-veylora-search-token"] ?? ""));
       return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
     };
-    const result = await searchViaGateway({ primaryUrl: "https://primary.example", fallbackUrl: "https://fallback.example", enabled: true, maxQueryChars: 1000, authToken: "secret" }, "hello", fetchImpl, 1000);
+    const result = await searchViaGateway({ primaryUrl: "https://primary.example", fallbackUrl: "https://fallback.example", enabled: true, maxQueryChars: 1000, language: "ru", categories: "general", timeRange: "week", safeSearch: 2, authToken: "secret" }, "hello", fetchImpl, 1000);
     expect(result).toEqual(payload);
     expect(calls).toEqual(["primary.example:secret"]);
   });
@@ -22,7 +22,7 @@ describe("Search Gateway", () => {
       if (host === "primary.example") throw new Error("primary_down");
       return new Response(JSON.stringify({ results: [] }), { status: 200 });
     };
-    const result = await searchViaGateway({ primaryUrl: "https://primary.example", fallbackUrl: "https://fallback.example", enabled: true, maxQueryChars: 1000 }, "hello", fetchImpl, 1000);
+    const result = await searchViaGateway({ primaryUrl: "https://primary.example", fallbackUrl: "https://fallback.example", enabled: true, maxQueryChars: 1000, language: "all", categories: "general", timeRange: "", safeSearch: 0 }, "hello", fetchImpl, 1000);
     expect(result).toEqual({ results: [] });
     expect(calls).toEqual(["primary.example", "fallback.example"]);
   });
