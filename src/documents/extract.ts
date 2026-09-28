@@ -54,8 +54,7 @@ export async function extractDocument(
         .filter(Boolean)
         .join(" "),
     );
-    if (parts.join("
-").length >= maxChars) break;
+    if (parts.join("\n").length >= maxChars) break;
   }
   await pdf.destroy();
   return { fileType, pages: pdf.numPages, text: normalizeText(parts.join("
