@@ -1,6 +1,6 @@
 import { getSystemConfig, getSystemConfigInt } from "../config";
 import { reservePoints, releaseReservation, settleReservation } from "../billing/points";
-import { createAIGateway, type AIGateway } from "../ai-gateway";
+import type { AIGateway } from "../ai-gateway";
 import { resolveModel } from "../models/registry";
 import { acquireActiveChatOperation, releaseActiveChatOperation } from "../operations/locks";
 import { createOperation, transitionOperation } from "../operations/service";
