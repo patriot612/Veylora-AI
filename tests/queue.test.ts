@@ -31,13 +31,15 @@ function fakeQueue() {
 function fakeMessage(body: unknown) {
   let acked = false;
   let retried = false;
+  let retryOptions: unknown;
   return {
     body,
     ack: () => { acked = true; },
-    retry: () => { retried = true; },
+    retry: (options?: unknown) => { retried = true; retryOptions = options; },
     get acked() { return acked; },
     get retried() { return retried; },
-  } as unknown as Message<unknown> & { readonly acked: boolean; readonly retried: boolean };
+    get retryOptions() { return retryOptions; },
+  } as unknown as Message<unknown> & { readonly acked: boolean; readonly retried: boolean; readonly retryOptions: unknown };
 }
 
 describe("heavy queue producer", () => {
@@ -185,6 +187,27 @@ describe("heavy queue consumer", () => {
     expect(op?.temporary_result_ref).toBeNull();
     expect(reservation?.status).toBe("captured");
     expect(job?.status).toBe("succeeded");
+  });
+
+  it("honors retry_after when a heavy handler requests a Telegram delivery retry", async () => {
+    const { userId, modelId } = await seedHeavyUser(50, 5);
+    const operationId = crypto.randomUUID();
+    const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,5,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+    await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 5, now: "2026-09-28T12:00:00Z" });
+    const message = fakeMessage(queue.sent[0]);
+    const result = await processQueueMessage(message, {
+      db: env.DB,
+      now: () => "2026-09-28T12:01:00Z",
+      handlers: {
+        image: async () => ({ ok: false, retryable: true, code: "telegram_delivery_retry", retryAfterSeconds: 7 }),
+        voice: async () => ({ ok: true } as const),
+        document: async () => ({ ok: true } as const),
+      },
+    });
+    expect(result).toBe("retried");
+    expect(message.retried).toBe(true);
+    expect(message.retryOptions).toEqual({ delaySeconds: 7 });
   });
 
   it("retries transient failures without releasing reserved points", async () => {
