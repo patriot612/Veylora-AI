@@ -51,14 +51,98 @@ async function dashboard(env: Env, session: AdminSession) {
   return Response.json({ ok: true, role: session.role, users: users?.count ?? 0, operations24h: operations?.count ?? 0, queuePending: queueJobs?.count ?? 0, activeSubscriptions: subscriptions?.count ?? 0, stars24h: payments?.stars ?? 0 }, { headers: noStore() });
 }
 
-async function users(env: Env) {
-  const rows = await env.DB.prepare("SELECT id,telegram_user_id,username,first_name,status,active_mode,daily_points_remaining,bonus_points,created_at,updated_at FROM users ORDER BY created_at DESC LIMIT 200").all();
-  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+async function users(env: Env, request: Request, session: AdminSession, segments: string[]) {
+  if (request.method === "GET") {
+    if (segments[0]) {
+      const telegramUserId = Number(segments[0]);
+      if (!Number.isSafeInteger(telegramUserId) || telegramUserId <= 0) return Response.json({ error: "invalid_telegram_user_id" }, { status: 400, headers: noStore() });
+      const user = await env.DB.prepare("SELECT id,telegram_user_id,username,first_name,status,active_mode,daily_points_remaining,bonus_points,created_at,updated_at FROM users WHERE telegram_user_id=?1").bind(telegramUserId).first();
+      if (!user) return Response.json({ error: "user_not_found" }, { status: 404, headers: noStore() });
+      const userId = (user as { id: string }).id;
+      const [subscription, activity] = await Promise.all([
+        env.DB.prepare("SELECT s.id,s.plan_id,p.name AS plan_name,s.status,s.starts_at,s.ends_at FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=?1 ORDER BY s.created_at DESC LIMIT 5").bind(userId).all(),
+        env.DB.prepare("SELECT type,status,points_cost,created_at,finished_at,error_code FROM operations WHERE user_id=?1 ORDER BY created_at DESC LIMIT 50").bind(userId).all(),
+      ]);
+      return Response.json({ ok: true, user, subscription: subscription.results ?? [], activity: activity.results ?? [] }, { headers: noStore() });
+    }
+    const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+    const rows = q
+      ? await env.DB.prepare("SELECT id,telegram_user_id,username,first_name,status,active_mode,daily_points_remaining,bonus_points,created_at,updated_at FROM users WHERE username LIKE ?1 OR first_name LIKE ?1 OR CAST(telegram_user_id AS TEXT)=?2 ORDER BY created_at DESC LIMIT 200").bind("%" + q + "%", q).all()
+      : await env.DB.prepare("SELECT id,telegram_user_id,username,first_name,status,active_mode,daily_points_remaining,bonus_points,created_at,updated_at FROM users ORDER BY created_at DESC LIMIT 200").all();
+    return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+  }
+
+  if (request.method === "POST" && segments.length === 2 && segments[1] === "bonus") {
+    assertPermission(session, "users.write");
+    const telegramUserId = Number(segments[0]);
+    const body = await request.json<{ amount?: unknown }>();
+    const amount = Number(body.amount);
+    if (!Number.isSafeInteger(telegramUserId) || telegramUserId <= 0 || !Number.isSafeInteger(amount) || amount <= 0 || amount > 1_000_000) {
+      return Response.json({ error: "invalid_bonus_amount" }, { status: 400, headers: noStore() });
+    }
+    const user = await env.DB.prepare("SELECT id FROM users WHERE telegram_user_id=?1").bind(telegramUserId).first<{id:string}>();
+    if (!user) return Response.json({ error: "user_not_found" }, { status: 404, headers: noStore() });
+    if (!(await grantBonusPoints(env.DB, user.id, amount, new Date().toISOString()))) {
+      return Response.json({ error: "bonus_grant_failed" }, { status: 409, headers: noStore() });
+    }
+    await writeAudit(env.DB, user.id, "bonus.grant", "user", user.id, session.role);
+    return Response.json({ ok: true, amount }, { headers: noStore() });
+  }
+
+  return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
 }
-async function models(env: Env) {
-  const rows = await env.DB.prepare("SELECT m.id,m.display_name,m.type,m.points_cost,m.subscription_only,m.enabled,m.provider_model_id,f.name AS family_name,p.name AS provider_name,c.name AS credential_name FROM models m JOIN families f ON f.id=m.family_id JOIN providers p ON p.id=m.provider_id JOIN credentials c ON c.id=m.credential_id ORDER BY m.type,m.display_name").all();
-  return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+
+async function models(env: Env, request: Request, session: AdminSession, segments: string[]) {
+  if (request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT m.id,m.display_name,m.type,m.points_cost,m.subscription_only,m.enabled,m.provider_model_id,f.name AS family_name,p.name AS provider_name,c.name AS credential_name FROM models m JOIN families f ON f.id=m.family_id JOIN providers p ON p.id=m.provider_id JOIN credentials c ON c.id=m.credential_id ORDER BY m.type,m.display_name").all();
+    return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+  }
+  assertPermission(session, "models.write");
+  const modelId = segments[0] ?? "";
+  if (!modelId) return Response.json({ error: "model_id_required" }, { status: 400, headers: noStore() });
+  if (request.method !== "PUT") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
+  const body = await request.json<Record<string, unknown>>();
+  const updates: string[] = [];
+  const bindings: unknown[] = [];
+  const assign = (column: string, value: unknown) => { updates.push(column + "=?"+(bindings.length + 1)); bindings.push(value); };
+  if ("pointsCost" in body) {
+    const value = Number(body.pointsCost);
+    if (!Number.isSafeInteger(value) || value < 0) return Response.json({ error: "invalid_points_cost" }, { status: 400, headers: noStore() });
+    assign("points_cost", value);
+  }
+  if ("subscriptionOnly" in body) {
+    const value = body.subscriptionOnly === true ? 1 : body.subscriptionOnly === false ? 0 : Number(body.subscriptionOnly);
+    if (value !== 0 && value !== 1) return Response.json({ error: "invalid_subscription_only" }, { status: 400, headers: noStore() });
+    assign("subscription_only", value);
+  }
+  if ("enabled" in body) {
+    const value = body.enabled === true ? 1 : body.enabled === false ? 0 : Number(body.enabled);
+    if (value !== 0 && value !== 1) return Response.json({ error: "invalid_enabled" }, { status: 400, headers: noStore() });
+    assign("enabled", value);
+  }
+  if ("displayName" in body) {
+    if (typeof body.displayName !== "string" || body.displayName.trim().length === 0 || body.displayName.length > 200) return Response.json({ error: "invalid_display_name" }, { status: 400, headers: noStore() });
+    assign("display_name", body.displayName.trim());
+  }
+  if ("contextWindow" in body) {
+    const value = Number(body.contextWindow);
+    if (!Number.isSafeInteger(value) || value <= 0) return Response.json({ error: "invalid_context_window" }, { status: 400, headers: noStore() });
+    assign("context_window", value);
+  }
+  if ("maxOutputTokens" in body) {
+    const value = Number(body.maxOutputTokens);
+    if (!Number.isSafeInteger(value) || value <= 0) return Response.json({ error: "invalid_max_output_tokens" }, { status: 400, headers: noStore() });
+    assign("max_output_tokens", value);
+  }
+  if (!updates.length) return Response.json({ error: "no_changes" }, { status: 400, headers: noStore() });
+  updates.push("updated_at=?"+(bindings.length + 1));
+  bindings.push(new Date().toISOString());
+  const result = await env.DB.prepare("UPDATE models SET " + updates.join(",") + " WHERE id=?"+(bindings.length + 1)).bind(...bindings, modelId).run();
+  if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "model_not_found" }, { status: 404, headers: noStore() });
+  await writeAudit(env.DB, null, "model.update", "model", modelId, session.role);
+  return Response.json({ ok: true }, { headers: noStore() });
 }
+
 async function providers(env: Env) {
   const rows = await env.DB.prepare("SELECT id,name,adapter_type,endpoint,enabled,created_at,updated_at FROM providers ORDER BY name").all();
   return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
