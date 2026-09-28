@@ -24,6 +24,8 @@ export type TelegramUpdateEnvelope = {
   text?: string;
   callbackData?: string;
   document?: { fileId: string; fileName?: string; mimeType?: string; fileSize?: number };
+  preCheckout?: { id: string; currency: string; totalAmount: number; invoicePayload: string };
+  payment?: { currency: string; totalAmount: number; invoicePayload: string; chargeId: string };
 };
 
 export function classifyTelegramUpdate(update: Record<string, unknown>): TelegramUpdateEnvelope {
@@ -61,7 +63,29 @@ export function classifyTelegramUpdate(update: Record<string, unknown>): Telegra
     }
     if (Array.isArray(message.photo)) return { update_id: updateId, user, kind: "photo", ...meta };
     if (isRecord(message.voice)) return { update_id: updateId, user, kind: "voice", ...meta };
-    if (isRecord(message.successful_payment)) return { update_id: updateId, user, kind: "payment", ...meta };
+    if (isRecord(message.successful_payment)) {
+      const payment = message.successful_payment;
+      if (
+        typeof payment.currency === "string" &&
+        typeof payment.total_amount === "number" &&
+        typeof payment.invoice_payload === "string" &&
+        typeof payment.telegram_payment_charge_id === "string"
+      ) {
+        return {
+          update_id: updateId,
+          user,
+          kind: "payment",
+          ...meta,
+          payment: {
+            currency: payment.currency,
+            totalAmount: payment.total_amount,
+            invoicePayload: payment.invoice_payload,
+            chargeId: payment.telegram_payment_charge_id,
+          },
+        };
+      }
+      return { update_id: updateId, user, kind: "unknown", ...meta };
+    }
     return { update_id: updateId, user, kind: "unknown", chat_id: chatId, message_id: messageId };
   }
 
@@ -76,7 +100,26 @@ export function classifyTelegramUpdate(update: Record<string, unknown>): Telegra
   }
 
   if (isRecord(update.pre_checkout_query)) {
-    return { update_id: updateId, user: asTelegramUser(update.pre_checkout_query.from), kind: "pre_checkout" };
+    const query = update.pre_checkout_query;
+    if (
+      typeof query.id === "string" &&
+      typeof query.currency === "string" &&
+      typeof query.total_amount === "number" &&
+      typeof query.invoice_payload === "string"
+    ) {
+      return {
+        update_id: updateId,
+        user: asTelegramUser(query.from),
+        kind: "pre_checkout",
+        preCheckout: {
+          id: query.id,
+          currency: query.currency,
+          totalAmount: query.total_amount,
+          invoicePayload: query.invoice_payload,
+        },
+      };
+    }
+    return { update_id: updateId, user: asTelegramUser(query.from), kind: "unknown" };
   }
 
   if (isRecord(update.my_chat_member)) {
