@@ -35,23 +35,24 @@ export default {
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": "same-origin", "access-control-allow-headers": "Content-Type, X-Telegram-Init-Data", "cache-control": "no-store" } });
       if (!env.TELEGRAM_BOT_TOKEN) return jsonResponse({ error: "admin_not_configured" }, 503);
 
+      let identity: Awaited<ReturnType<typeof validateMiniAppInitData>>;
       try {
         const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
-        const identity = await validateMiniAppInitData(initData, env.TELEGRAM_BOT_TOKEN);
-        const configuredOwnerId = Number(env.ADMIN_OWNER_TELEGRAM_ID);
-        const bootstrapOwnerTelegramId = Number.isSafeInteger(configuredOwnerId) && configuredOwnerId > 0 ? configuredOwnerId : undefined;
-        const session = await loadAdminSession(env.DB, identity, bootstrapOwnerTelegramId);
-        if (!session) return jsonResponse({ error: "forbidden" }, 403);
-        try {
-          return await handleAdminApi(request, env, session);
-        } catch (error) {
-          if (error instanceof Error && error.message === "admin_forbidden") return jsonResponse({ error: "forbidden" }, 403);
-          throw error;
-        }
-      } catch (error) {
-        if (error instanceof Error && ["admin_forbidden"].includes(error.message)) return jsonResponse({ error: "forbidden" }, 403);
-        if (error instanceof Error && error.message === "admin_not_configured") return jsonResponse({ error: "admin_not_configured" }, 503);
+        identity = await validateMiniAppInitData(initData, env.TELEGRAM_BOT_TOKEN);
+      } catch {
         return jsonResponse({ error: "unauthorized" }, 401);
+      }
+
+      const configuredOwnerId = Number(env.ADMIN_OWNER_TELEGRAM_ID);
+      const bootstrapOwnerTelegramId = Number.isSafeInteger(configuredOwnerId) && configuredOwnerId > 0 ? configuredOwnerId : undefined;
+      const session = await loadAdminSession(env.DB, identity, bootstrapOwnerTelegramId);
+      if (!session) return jsonResponse({ error: "forbidden" }, 403);
+
+      try {
+        return await handleAdminApi(request, env, session);
+      } catch (error) {
+        if (error instanceof Error && error.message === "admin_forbidden") return jsonResponse({ error: "forbidden" }, 403);
+        return jsonResponse({ error: "admin_internal_error" }, 500);
       }
     }
 
