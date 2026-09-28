@@ -1,6 +1,6 @@
 import { env } from "./test-env";
 import { describe, expect, it } from "vitest";
-import { runScheduledCleanup } from "../src/cleanup";
+import worker from "../src/index";
 
 describe("scheduled cleanup", () => {
   it("expires subscriptions and removes expired document sessions without touching active state", async () => {
@@ -22,21 +22,20 @@ describe("scheduled cleanup", () => {
       env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'active','2026-09-29T00:00:00Z')").bind(crypto.randomUUID(), activeSession),
     ]);
 
-    const result = await runScheduledCleanup(env.DB, "2026-09-28T00:00:00Z");
-    expect(result.documentSessions).toBe(1);
-    expect(result.documentChunks).toBe(1);
-    expect(result.subscriptions).toBe(1);
+    await worker.scheduled({ cron: "0 * * * *", scheduledTime: Date.parse("2026-09-28T00:00:00Z"), type: "scheduled" } as ScheduledController, env);
 
     const expiredOwner = await env.DB.prepare("SELECT active_document_session_id FROM users WHERE id=?1").bind(expiredUser).first<{active_document_session_id:string|null}>();
     const activeOwner = await env.DB.prepare("SELECT active_document_session_id FROM users WHERE id=?1").bind(activeUser).first<{active_document_session_id:string|null}>();
     const expiredSubscription = await env.DB.prepare("SELECT status FROM subscriptions WHERE user_id=?1").bind(expiredUser).first<{status:string}>();
     const activeSubscription = await env.DB.prepare("SELECT status FROM subscriptions WHERE user_id=?1").bind(activeUser).first<{status:string}>();
     const activeChunk = await env.DB.prepare("SELECT content FROM document_chunks WHERE session_id=?1").bind(activeSession).first<{content:string}>();
+    const expiredSessionRow = await env.DB.prepare("SELECT id FROM document_sessions WHERE id=?1").bind(expiredSession).first<{id:string}>();
 
     expect(expiredOwner?.active_document_session_id).toBeNull();
     expect(activeOwner?.active_document_session_id).toBe(activeSession);
     expect(expiredSubscription?.status).toBe("expired");
     expect(activeSubscription?.status).toBe("active");
     expect(activeChunk?.content).toBe("active");
+    expect(expiredSessionRow).toBeNull();
   });
 });
