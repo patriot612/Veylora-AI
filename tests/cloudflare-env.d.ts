@@ -1,3 +1,10 @@
 declare module "cloudflare:workers" {
-  interface ProvidedEnv extends Env {}
+  interface ProvidedEnv {
+    DB: D1Database;
+    AI_JOBS: Queue;
+    ENVIRONMENT: string;
+    TEST_MIGRATIONS: D1Migration[];
+    TELEGRAM_BOT_TOKEN?: string;
+    TELEGRAM_WEBHOOK_SECRET?: string;
+  }
 }
