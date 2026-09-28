@@ -239,4 +239,93 @@ describe("Admin Mini App HTTP surface", () => {
     expect(stored?.encrypted_secret).not.toContain("super-secret");
   });
 
+  it("supports Model Registry CRUD, Search controls and maintenance RBAC", async () => {
+    const ownerTelegramId = 940000008;
+    const ownerUserId = crypto.randomUUID();
+    await seedAdminUser(ownerUserId, ownerTelegramId, "owner");
+    const initData = await buildInitData("test-bot-token", Math.floor(Date.now() / 1000) - 30, ownerTelegramId);
+    const headers = { "X-Telegram-Init-Data": initData, "content-type": "application/json" };
+
+    const options = await worker.default.fetch("https://example.test/admin/api/models/options", { headers });
+    expect(options.status).toBe(200);
+    const optionsBody = await options.json() as {families?:Array<{id:string}>;providers?:Array<{id:string}>;credentials?:Array<{id:string;provider_id:string}>};
+    const familyId = optionsBody.families?.[0]?.id;
+    const providerId = optionsBody.providers?.[0]?.id;
+    const credentialId = optionsBody.credentials?.find((row) => row.provider_id === providerId)?.id;
+    expect(familyId).toBeTruthy();
+    expect(providerId).toBeTruthy();
+    expect(credentialId).toBeTruthy();
+
+    const modelId = "admin-crud-" + crypto.randomUUID();
+    const created = await worker.default.fetch("https://example.test/admin/api/models", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: modelId,
+        familyId,
+        providerId,
+        credentialId,
+        displayName: "Admin CRUD Model",
+        type: "chat",
+        providerModelId: "admin-crud-model",
+        pointsCost: 9,
+        subscriptionOnly: false,
+        enabled: true,
+      }),
+    });
+    expect(created.status).toBe(200);
+
+    const deleted = await worker.default.fetch("https://example.test/admin/api/models/" + modelId, { method: "DELETE", headers });
+    expect(deleted.status).toBe(200);
+
+    const searchWrite = await worker.default.fetch("https://example.test/admin/api/search", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        "search.enabled": true,
+        "search.primary_url": "https://search.example",
+        "search.fallback_url": "https://fallback.example",
+        "search.language": "ru",
+        "search.categories": "general",
+        "search.time_range": "week",
+        "search.safe_search": 2,
+      }),
+    });
+    expect(searchWrite.status).toBe(200);
+
+    const searchRead = await worker.default.fetch("https://example.test/admin/api/search", { headers });
+    expect(searchRead.status).toBe(200);
+    const searchBody = await searchRead.json() as {config?:Array<{config_key:string;config_value:string}>};
+    expect(searchBody.config?.some((row) => row.config_key === "search.language" && row.config_value === "ru")).toBe(true);
+
+    const secretConfig = await worker.default.fetch("https://example.test/admin/api/config", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ key: "provider_api_token", value: "secret" }),
+    });
+    expect(secretConfig.status).toBe(403);
+
+    const maintenance = await worker.default.fetch("https://example.test/admin/api/queue", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ maintenanceMode: true }),
+    });
+    expect(maintenance.status).toBe(200);
+
+    const queueRead = await worker.default.fetch("https://example.test/admin/api/queue", { headers });
+    expect(queueRead.status).toBe(200);
+    expect((await queueRead.json() as {maintenanceMode:boolean}).maintenanceMode).toBe(true);
+
+    const supportTelegramId = 940000009;
+    const supportUserId = crypto.randomUUID();
+    await seedAdminUser(supportUserId, supportTelegramId, "support");
+    const supportInit = await buildInitData("test-bot-token", Math.floor(Date.now() / 1000) - 30, supportTelegramId);
+    const supportMaintenance = await worker.default.fetch("https://example.test/admin/api/queue", {
+      method: "PUT",
+      headers: { "X-Telegram-Init-Data": supportInit, "content-type": "application/json" },
+      body: JSON.stringify({ maintenanceMode: false }),
+    });
+    expect(supportMaintenance.status).toBe(403);
+  });
+
 });
