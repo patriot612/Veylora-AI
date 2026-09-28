@@ -95,10 +95,11 @@ export async function processVoiceJob(
   const operation = await deps.db
     .prepare("SELECT status, model_id FROM operations WHERE id=?1 AND user_id=?2")
     .bind(message.operationId, message.userId)
-    .first<{ status: string; model_id: string | null }>();
+    .first<{ status: string; model_id: string | null; telegram_delivery_status: string }>();
 
   if (!operation?.model_id) return { ok: false, retryable: false, code: "voice_operation_not_found" };
   if (["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) return { ok: true };
+  if (operation.telegram_delivery_status === "sent") return { ok: true };
 
   const fileId = stringValue(message.metadata?.fileId);
   const chatId = numberValue(message.metadata?.chatId);
