@@ -59,7 +59,8 @@ export async function searchViaGateway(
       const url = new URL("/search", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
       url.searchParams.set("q", query);
       url.searchParams.set("format", "json");
-      url.searchParams.set("categories", config.categories);\n      if (config.language && config.language !== "all") url.searchParams.set("language", config.language);\n      if (config.timeRange) url.searchParams.set("time_range", config.timeRange);\n      url.searchParams.set("safesearch", String(config.safeSearch));
+      url.searchParams.set("categories", config.categories);
+      if (config.language && config.language !== "all") url.searchParams.set("language", config.language);\n      if (config.timeRange) url.searchParams.set("time_range", config.timeRange);\n      url.searchParams.set("safesearch", String(config.safeSearch));
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort("search_timeout"), timeoutMs);
       try {
