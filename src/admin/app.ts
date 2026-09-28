@@ -87,7 +87,7 @@ async function render(tab){
       return;
    }
    if(tab==="queue"){
-      app.innerHTML='<div class="card"><strong>Queue / System</strong><pre>'+esc(JSON.stringify(rows,null,2))+'</pre><div class="muted">Maintenance controls are server-side configuration and remain protected by RBAC.</div></div>';
+      app.innerHTML='<div class="card"><strong>Queue / System</strong><div class="metric">DLQ: '+esc(data.deadLettered)+'</div><div>Failures: '+esc(data.failed)+' · Retry attempts: '+esc(data.retries)+'</div><label>Maintenance mode <input id="maintenance-mode" type="checkbox" '+(data.maintenanceMode?"checked":"")+' /></label> <button data-action="save-maintenance">Save</button></div><div class="card"><pre>'+esc(JSON.stringify(rows,null,2))+'</pre></div>';
       return;
    }
    if(tab==="config"){
@@ -198,6 +198,11 @@ async function refundOrder(id){
  await api("payments/"+encodeURIComponent(id)+"/refund",{method:"POST"});
  await render("payments");
 }
+async function saveMaintenance(){
+ const enabled=document.getElementById("maintenance-mode").checked;
+ await api("queue",{method:"PUT",body:JSON.stringify({maintenanceMode:enabled})});
+ await render("queue");
+}
 async function saveSearch(){
  const body={
    "search.enabled":document.getElementById("search-enabled").checked,
@@ -244,6 +249,7 @@ app.addEventListener("click",async(event)=>{
   if(action==="refund") return refundOrder(id);
   if(action==="edit-config") return editConfig(target.dataset.key);
   if(action==="save-search") return saveSearch();
+  if(action==="save-maintenance") return saveMaintenance();
  }catch(e){app.innerHTML='<div class="card"><strong>Ошибка</strong><pre>'+esc(e.message)+'</pre></div>';}
 });
 tabs.forEach(tab=>{const b=document.createElement("button");b.className="tab";b.textContent=tab;b.onclick=()=>render(tab);nav.appendChild(b);});
