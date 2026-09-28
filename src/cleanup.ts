@@ -1,10 +1,12 @@
 import { settleReservation } from "./billing/points";
+import { pruneRateLimitBuckets } from "./security/rate-limit";
 
 export type CleanupResult = {
   documentSessions: number;
   documentChunks: number;
   subscriptions: number;
   settledDeliveries: number;
+  rateLimitBuckets: number;
 };
 
 /**
@@ -28,11 +30,14 @@ export async function runScheduledCleanup(db: D1Database, now: string): Promise<
   await db.prepare("DELETE FROM document_sessions WHERE expires_at <= ?1").bind(now).run();
   await db.prepare("DELETE FROM rate_limit_buckets WHERE bucket_start < datetime(?1, '-2 minutes')").bind(now).run();
 
+  const rateLimitBuckets = await pruneRateLimitBuckets(db, new Date(Date.parse(now) - 60 * 60 * 1000).toISOString());
+
   const expiredSubscriptions = await db.prepare("UPDATE subscriptions SET status='expired', updated_at=?1 WHERE status='active' AND ends_at <= ?1").bind(now).run();
   return {
     documentSessions: expiredSessions?.count ?? 0,
     documentChunks: deletedChunks.meta.changes ?? 0,
     subscriptions: expiredSubscriptions.meta.changes ?? 0,
     settledDeliveries,
+    rateLimitBuckets,
   };
 }
