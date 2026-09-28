@@ -1,14 +1,11 @@
 import { getSystemConfig, getSystemConfigInt } from "../config";
-import { encryptCredentialSecret } from "../security/credentials";
-import { createOperation, transitionOperation } from "../operations/service";
+import { createOperation } from "../operations/service";
+import { enqueueHeavyJob } from "../queue/producer";
 import { reservePoints, releaseReservation, settleReservation } from "../billing/points";
-import { getActivePlan } from "../subscriptions";
 import { createAIGateway, type AIGateway } from "../ai-gateway";
 import { resolveModel } from "../models/registry";
 import { getTelegramFile, downloadTelegramFile, sendTelegramMessage, TelegramApiError } from "../telegram/api";
 import { chunkDocumentText, extractDocument, rankChunks } from "./extract";
-
-type DocumentFileType = "pdf" | "docx" | "txt";
 
 export async function enterDocumentsMode(db: D1Database, userId: string, now: string) {
   await db.prepare("UPDATE users SET active_mode='documents', updated_at=?2 WHERE id=?1").bind(userId, now).run();
@@ -19,16 +16,16 @@ export async function exitDocumentsMode(db: D1Database, userId: string, now: str
   await db.prepare("UPDATE users SET active_mode='chat', active_document_session_id=NULL, updated_at=?2 WHERE id=?1").bind(userId, now).run();
 }
 
-export async function processDocumentUpload(input: {
+export async function enqueueDocumentUpload(input: {
   db: D1Database;
-  botToken: string;
+  queue: Queue;
   userId: string;
   fileId: string;
   mimeType?: string;
   fileName?: string;
+  chatId: number;
   now: string;
-  encryptionKey: string;
-}): Promise<{ sessionId: string } | { error: string }> {
+}): Promise<{ operationId: string } | { error: string }> {
   const activeMode = await input.db.prepare("SELECT active_mode FROM users WHERE id=?1").bind(input.userId).first<{active_mode:string}>();
   if (activeMode?.active_mode !== "documents") return { error: "document_mode_inactive" };
 
@@ -43,45 +40,94 @@ export async function processDocumentUpload(input: {
     now: input.now,
     requestHash: input.fileId,
   });
-  if (operation.duplicate) return { sessionId: await getSessionIdByOperation(input.db, operation.operation.id) };
-
-  const reservation = await reservePoints(input.db, input.userId, operation.operation.id, uploadCost, input.now);
-  if (!reservation.ok) return { error: "insufficient_points" };
+  if (operation.duplicate) return { operationId: operation.operation.id };
 
   try {
-    const file = await getTelegramFile(input.botToken, input.fileId);
-    const downloaded = await downloadTelegramFile(input.botToken, file.file_path, await getSystemConfigInt(input.db, "limits.document_bytes", 10 * 1024 * 1024));
-    const extracted = await extractDocument(downloaded.bytes, fileType, input.db);
+    await enqueueHeavyJob({
+      db: input.db,
+      queue: input.queue,
+      operationId: operation.operation.id,
+      userId: input.userId,
+      jobType: "document",
+      pointsCost: uploadCost,
+      now: input.now,
+      metadata: {
+        fileId: input.fileId,
+        mimeType: input.mimeType,
+        fileName: input.fileName,
+        fileType,
+        chatId: input.chatId,
+      },
+    });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "document_enqueue_failed" };
+  }
+
+  return { operationId: operation.operation.id };
+}
+
+export async function processDocumentUploadJob(
+  message: { operationId: string; userId: string; metadata?: Record<string, unknown> },
+  deps: { db: D1Database; botToken: string; now: () => string; fetchImpl?: typeof fetch },
+): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string }> {
+  const operation = await deps.db
+    .prepare("SELECT status FROM operations WHERE id=?1 AND user_id=?2")
+    .bind(message.operationId, message.userId)
+    .first<{ status: string }>();
+  if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) return { ok: true };
+
+  const fileId = stringValue(message.metadata?.fileId);
+  const fileType = stringValue(message.metadata?.fileType) as "pdf" | "docx" | "txt" | undefined;
+  const chatId = numberValue(message.metadata?.chatId);
+  if (!fileId || !fileType || chatId === null) {
+    await releaseReservation(deps.db, message.operationId, deps.now(), "failed", "document_payload_invalid");
+    return { ok: false, retryable: false, code: "document_payload_invalid" };
+  }
+
+  try {
+    const file = await getTelegramFile(deps.botToken, fileId, deps.fetchImpl ?? fetch);
+    const downloaded = await downloadTelegramFile(
+      deps.botToken,
+      file.file_path,
+      await getSystemConfigInt(deps.db, "limits.document_bytes", 10 * 1024 * 1024),
+      deps.fetchImpl ?? fetch,
+    );
+    const extracted = await extractDocument(downloaded.bytes, fileType, deps.db);
     if (!extracted.text.trim()) {
-      await releaseReservation(input.db, operation.operation.id, new Date().toISOString(), "failed", "document_no_text");
-      return { error: "document_no_text" };
+      await releaseReservation(deps.db, message.operationId, deps.now(), "failed", "document_no_text");
+      return { ok: false, retryable: false, code: "document_no_text" };
     }
 
-    const now = input.now;
-    const idleSeconds = await getSystemConfigInt(input.db, "limits.document_session_idle_seconds", 7200);
+    const now = deps.now();
+    const idleSeconds = await getSystemConfigInt(deps.db, "limits.document_session_idle_seconds", 7200);
     const expiresAt = new Date(Date.parse(now) + idleSeconds * 1000).toISOString();
     const sessionId = crypto.randomUUID();
-    const chunkSize = await getSystemConfigInt(input.db, "limits.document_chunk_size", 2000);
-    const overlap = await getSystemConfigInt(input.db, "limits.document_chunk_overlap", 200);
+    const chunkSize = await getSystemConfigInt(deps.db, "limits.document_chunk_size", 2000);
+    const overlap = await getSystemConfigInt(deps.db, "limits.document_chunk_overlap", 200);
     const chunks = chunkDocumentText(extracted.text, chunkSize, overlap);
 
-    await input.db.batch([
-      input.db.prepare(
+    await deps.db.batch([
+      deps.db.prepare(
         "INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,?3,?4,?5,?6,?6)",
-      ).bind(sessionId, input.userId, fileType, extracted.text.length, expiresAt, now),
-      ...chunks.map((content, index) => input.db.prepare(
+      ).bind(sessionId, message.userId, fileType, extracted.text.length, expiresAt, now),
+      ...chunks.map((content, index) => deps.db.prepare(
         "INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,?3,?4,?5)",
       ).bind(crypto.randomUUID(), sessionId, index, content, expiresAt)),
-      input.db.prepare(
-        "UPDATE users SET active_document_session_id=?2, updated_at=?3 WHERE id=?1",
-      ).bind(input.userId, sessionId, now),
+      deps.db.prepare(
+        "UPDATE users SET active_document_session_id=?2, active_mode='documents', updated_at=?3 WHERE id=?1",
+      ).bind(message.userId, sessionId, now),
     ]);
 
-    await settleReservation(input.db, operation.operation.id, new Date().toISOString());
-    return { sessionId };
+    await sendTelegramMessage(deps.botToken, chatId, "Документ готов. Задайте вопрос по содержимому.", {}, deps.fetchImpl ?? fetch);
+    return { ok: true };
   } catch (error) {
-    await releaseReservation(input.db, operation.operation.id, new Date().toISOString(), "failed", error instanceof Error ? error.message : "document_upload_failed");
-    return { error: error instanceof Error ? error.message : "document_upload_failed" };
+    if (error instanceof TelegramApiError && error.retryable) {
+      return { ok: false, retryable: true, code: "telegram_document_delivery_retry" };
+    }
+    if (error instanceof Error && /timeout|temporary|5\\d\\d/i.test(error.message)) {
+      return { ok: false, retryable: true, code: error.message };
+    }
+    return { ok: false, retryable: false, code: error instanceof Error ? error.message : "document_upload_failed" };
   }
 }
 
@@ -177,7 +223,10 @@ function inferFileType(mimeType?: string, fileName?: string): DocumentFileType |
   return null;
 }
 
-async function getSessionIdByOperation(db: D1Database, operationId: string): Promise<string> {
-  const row = await db.prepare("SELECT request_hash FROM operations WHERE id=?1").bind(operationId).first<{request_hash:string|null}>();
-  return row?.request_hash ?? "";
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
