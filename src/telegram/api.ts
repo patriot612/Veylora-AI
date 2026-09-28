@@ -155,3 +155,76 @@ export async function sendTelegramPhoto(
   }
   return body.result;
 }
+
+export async function getTelegramFile(
+  botToken: string,
+  fileId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ file_path: string }> {
+  return telegramApi<{ file_path: string }>(botToken, "getFile", { file_id: fileId }, fetchImpl);
+}
+
+export async function downloadTelegramFile(
+  botToken: string,
+  filePath: string,
+  maxBytes = 20 * 1024 * 1024,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+  const response = await fetchImpl("https://api.telegram.org/file/bot" + botToken + "/" + filePath);
+  if (!response.ok) throw new TelegramApiError("telegram_file_download_failed", "getFile", response.status >= 500);
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new TelegramApiError("telegram_file_too_large", "getFile", false);
+  }
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > maxBytes) throw new TelegramApiError("telegram_file_too_large", "getFile", false);
+  return {
+    bytes,
+    contentType: response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream",
+  };
+}
+
+export async function sendTelegramVoice(
+  botToken: string,
+  chatId: number,
+  source: { url?: string; bytes?: Uint8Array; contentType?: string },
+  extra: Record<string, unknown> = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ message_id: number }> {
+  if (source.url) {
+    return telegramApi<{ message_id: number }>(
+      botToken,
+      "sendVoice",
+      { chat_id: chatId, voice: source.url, ...extra },
+      fetchImpl,
+    );
+  }
+  if (!source.bytes) throw new TelegramApiError("telegram_voice_source_missing", "sendVoice", false);
+
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined) form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  const type = source.contentType ?? "audio/ogg";
+  const buffer = source.bytes.buffer.slice(source.bytes.byteOffset, source.bytes.byteOffset + source.bytes.byteLength) as ArrayBuffer;
+  const ext = type.includes("mpeg") ? "mp3" : type.includes("mp4") || type.includes("m4a") ? "m4a" : "ogg";
+  form.set("voice", new File([buffer], "voice." + ext, { type }));
+
+  const response = await fetchImpl(
+    "https://api.telegram.org/bot" + botToken + "/sendVoice",
+    { method: "POST", body: form },
+  );
+  let body: TelegramResponse<{ message_id: number }> | null = null;
+  try {
+    body = await response.json() as TelegramResponse<{ message_id: number }>;
+  } catch (error) {
+    throw new TelegramApiError("telegram_invalid_response", "sendVoice", response.status >= 500, undefined, { cause: error });
+  }
+  if (response.status === 429) {
+    throw new TelegramApiError(body?.description ?? "telegram_rate_limited", "sendVoice", true, body?.parameters?.retry_after);
+  }
+  if (response.status >= 500) throw new TelegramApiError(body?.description ?? "telegram_server_error", "sendVoice", true);
+  if (!response.ok || body?.ok !== true || !body.result) throw new TelegramApiError(body?.description ?? "telegram_request_failed", "sendVoice", false);
+  return body.result;
+}
