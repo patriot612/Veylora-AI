@@ -30,12 +30,13 @@ export type ChatResult =
 export async function handleChatMessage(input: ChatRequest): Promise<ChatResult> {
   const text = input.text.trim();
   const locale = await getUserLocale(input.db, input.userId);
-  await rememberChatRetryText(input.db, input.userId, text);
   const maxChars = await getSystemConfigInt(input.db, "limits.chat_chars", 4096);
   if (!text || text.length > maxChars) {
     await safeSend(input.send, locale === "ru" ? `Максимальная длина сообщения — ${maxChars} символов.` : `${t(locale, "chat.failed")} (max ${maxChars})`);
     return { kind: "invalid_input", retryable: false };
   }
+
+  await rememberChatRetryText(input.db, input.userId, text);
 
   const existingLock = await input.db
     .prepare("SELECT active_operation_id FROM users WHERE id = ?1")
