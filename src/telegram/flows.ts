@@ -261,24 +261,48 @@ export async function handleTelegramCallback(
   if (data.startsWith("dialog:")) {
     const conversationId = data.slice("dialog:".length);
     try {
-      await continueConversation(env.DB, userId, conversationId, now);
-      const history = await getConversationHistory(env.DB, userId, conversationId);
-      const recent = history.slice(-6);
+      const dialog = await getConversationHistory(env.DB, userId, conversationId);
+      const recent = dialog.slice(-6);
       const summary = recent.length
         ? recent.map((turn) => "👤 " + turn.userText + "\n🤖 " + turn.assistantText).join("\n\n")
         : "Сообщений пока нет.";
       await sendTelegramMessage(botToken, chatId, summary, {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "Продолжить", callback_data: "dialog_continue:" + conversationId }],
-            [{ text: "✏️ Переименовать", callback_data: "dialog:rename:" + conversationId }],
-            [{ text: "← Диалоги", callback_data: "menu:dialogs" }],
+            [{ text: t(locale, "dialogs.continue"), callback_data: "dialog_continue:" + conversationId }],
+            [{ text: t(locale, "dialogs.messages"), callback_data: "dialog:messages:" + conversationId }, { text: t(locale, "dialogs.history"), callback_data: "dialog:history:" + conversationId }],
+            [{ text: t(locale, "dialogs.rename"), callback_data: "dialog:rename:" + conversationId }, { text: t(locale, "dialogs.archive"), callback_data: "dialog:archive:" + conversationId }],
+            [{ text: t(locale, "common.back"), callback_data: "menu:dialogs" }],
           ],
         },
       });
     } catch {
       await sendTelegramMessage(botToken, chatId, "Не удалось открыть этот диалог.");
     }
+    return true;
+  }
+
+  if (data.startsWith("dialog:messages:")) {
+    const conversationId = data.slice("dialog:messages:".length);
+    const history = await getConversationHistory(env.DB, userId, conversationId);
+    const recent = history.slice(-6);
+    const summary = recent.length
+      ? recent.map((turn) => "👤 " + turn.userText + "\n🤖 " + turn.assistantText).join("\n\n")
+      : "Сообщений пока нет.";
+    await sendTelegramMessage(botToken, chatId, summary, {
+      reply_markup: { inline_keyboard: [[{ text: t(locale, "dialogs.continue"), callback_data: "dialog_continue:" + conversationId }], [{ text: t(locale, "common.back"), callback_data: "dialog:" + conversationId }]] },
+    });
+    return true;
+  }
+
+  if (data.startsWith("dialog:history:")) {
+    const conversationId = data.slice("dialog:history:".length);
+    const history = await getConversationHistory(env.DB, userId, conversationId);
+    const full = history.map((turn) => "👤 " + turn.userText + "\n🤖 " + turn.assistantText).join("\n\n") || "Сообщений пока нет.";
+    const chunks: string[] = [];
+    for (let offset = 0; offset < full.length; offset += 3500) chunks.push(full.slice(offset, offset + 3500));
+    for (const chunk of chunks.slice(0, 10)) await sendTelegramMessage(botToken, chatId, chunk);
+    await sendTelegramMessage(botToken, chatId, t(locale, "dialogs.history"), { reply_markup: { inline_keyboard: [[{ text: t(locale, "common.back"), callback_data: "dialog:" + conversationId }]] } });
     return true;
   }
 
