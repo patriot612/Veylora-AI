@@ -11,6 +11,7 @@ export default defineConfig({
       miniflare: {
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations(path.resolve("migrations")),
+          TELEGRAM_WEBHOOK_SECRET: "test-secret",
         },
       },
     }),
