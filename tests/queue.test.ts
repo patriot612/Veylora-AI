@@ -84,6 +84,32 @@ describe("heavy queue producer", () => {
     expect(queue.sent).toHaveLength(0);
   });
 
+  it("claims concurrent enqueue ownership exactly once", async () => {
+    const { userId, modelId } = await seedHeavyUser(50, 14);
+    const operationId = crypto.randomUUID();
+    const queue = fakeQueue();
+    await env.DB.prepare("INSERT INTO operations (id,user_id,type,status,model_id,points_cost,created_at) VALUES (?1,?2,'image','created',?3,14,'2026-09-28T12:00:00Z')").bind(operationId, userId, modelId).run();
+
+    const enqueue = () => enqueueHeavyJob({
+      db: env.DB,
+      queue,
+      operationId,
+      userId,
+      jobType: "image",
+      pointsCost: 14,
+      now: "2026-09-28T12:00:00Z",
+    });
+    await Promise.all([enqueue(), enqueue()]);
+
+    const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
+    const operation = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
+    const job = await env.DB.prepare("SELECT status FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string}>();
+    expect(user?.daily_points_remaining).toBe(36);
+    expect(operation?.status).toBe("queued");
+    expect(job?.status).toBe("pending");
+    expect(queue.sent).toHaveLength(1);
+  });
+
 describe("heavy queue consumer", () => {
   it("processes success exactly once and captures reservation", async () => {
     const { userId, modelId } = await seedHeavyUser(50, 10);
