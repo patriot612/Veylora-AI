@@ -1,4 +1,4 @@
-import { xnv } from "./test-env";
+import { env } from "./test-env";
 import { describe, expect, it } from "vitest";
 import { enterVoiceMode, exitVoiceMode, enqueueVoiceMessage, processVoiceJob } from "../src/voice/service";
 import { encryptCredentialSecret } from "../src/security/credentials";
