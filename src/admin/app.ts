@@ -54,7 +54,7 @@ tabs.forEach(tab=>{const b=document.createElement("button");b.className="tab";b.
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "content-security-policy": "default-src 'self'; script-src 'self' https://telegram.org 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "content-security-policy": "default-src 'self'; script-src 'self' https://telegram.org 'nonce-" + nonce + "'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     },
   });
 }
