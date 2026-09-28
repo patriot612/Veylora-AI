@@ -2,10 +2,11 @@ const IV_BYTES = 12;
 const KEY_BYTES = 32;
 const VERSION_PREFIX = "v1";
 
-function decodeBase64Url(value: string): Uint8Array {
+function decodeBase64Url(value: string): ArrayBuffer {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
   const raw = atob(normalized);
-  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+  const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 function encodeBase64Url(value: Uint8Array): string {
@@ -24,7 +25,8 @@ export async function encryptCredentialSecret(secret: string, encryptionKey: str
   if (!encryptionKey) throw new Error("credential_encryption_key_missing");
   const key = await deriveKey(encryptionKey);
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(secret)));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer }, key, new TextEncoder().encode(secret));
+  const ciphertext = new Uint8Array(encrypted);
   return [VERSION_PREFIX, encodeBase64Url(iv), encodeBase64Url(ciphertext)].join(".");
 }
 
