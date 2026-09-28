@@ -1,0 +1,466 @@
+import { createNewConversation, continueConversation, archiveConversation, restoreConversation, deleteArchivedConversation, listActiveConversations, listArchivedConversations, setChatModel, setConversationRole, listEnabledRoles } from "../dialogs/service";
+import { getActivePlan } from "../subscriptions";
+import { listSelectableModels } from "../models/registry";
+import { createPlanInvoice } from "../payments/service";
+import { handleImageRequest } from "../image/service";
+import { answerTelegramCallbackQuery, sendTelegramMessage } from "./api";
+import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
+import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
+
+type UserPrefs = Record<string, unknown>;
+
+export async function handleStartCommand(
+  env: Env,
+  requestUrl: string,
+  userId: string,
+  telegramUserId: number,
+  chatId: number,
+  command: string,
+  now: string,
+): Promise<boolean> {
+  const botToken = env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) throw new Error("telegram_bot_token_missing");
+
+  if (command === "/start") {
+    const defaultModel = await env.DB.prepare("SELECT config_value FROM system_config WHERE config_key='default_chat_model_id'")
+      .first<{ config_value: string }>();
+    if (defaultModel?.config_value) {
+      await env.DB.prepare(
+        "UPDATE users SET active_chat_model_id=COALESCE(active_chat_model_id,?2),active_mode='chat',updated_at=?3 WHERE id=?1",
+      ).bind(userId, defaultModel.config_value, now).run();
+    }
+    await sendTelegramMessage(botToken, chatId, "Привет! Выберите функцию или сразу задайте вопрос.", { reply_markup: mainMenuKeyboard(false) });
+    return true;
+  }
+
+  if (command === "/admin") {
+    const allowed = await isAdminTelegramUser(env, telegramUserId);
+    if (!allowed) {
+      await sendTelegramMessage(botToken, chatId, "Недостаточно прав.");
+      return true;
+    }
+    const adminUrl = new URL("/admin", requestUrl).toString();
+    await sendTelegramMessage(botToken, chatId, "Открыть Veylora Admin:", {
+      reply_markup: { inline_keyboard: [[{ text: "🛠 Open Admin Mini App", web_app: { url: adminUrl } }]] },
+    });
+    return true;
+  }
+
+  if (command === "/paysupport") {
+    await sendTelegramMessage(botToken, chatId, "Поддержка платежей Veylora AI: отправьте номер заказа и кратко опишите проблему.");
+    return true;
+  }
+
+  return false;
+}
+
+export async function handleTelegramCallback(
+  env: Env,
+  requestUrl: string,
+  userId: string,
+  telegramUserId: number,
+  chatId: number,
+  callbackId: string | undefined,
+  data: string,
+  now: string,
+): Promise<boolean> {
+  const botToken = env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) throw new Error("telegram_bot_token_missing");
+  if (callbackId) await answerTelegramCallbackQuery(botToken, callbackId).catch(() => false);
+
+  if (data === "menu:chat") {
+    await setMode(env.DB, userId, "chat", now);
+    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Просто отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+    return true;
+  }
+
+  if (data === "menu:image") {
+    await setMode(env.DB, userId, "image", now);
+    const models = await listSelectableModels(env.DB, { userId, type: "image", now });
+    await sendTelegramMessage(botToken, chatId, "🎨 Изображения\nВыберите модель, затем отправьте описание.", {
+      reply_markup: {
+        inline_keyboard: [
+          ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "image_model:" + model.id }]),
+          [{ text: "Размер 1024×1024", callback_data: "image_size:1024x1024" }, { text: "1536×1024", callback_data: "image_size:1536x1024" }],
+          [{ text: "Standard", callback_data: "image_quality:standard" }, { text: "HD", callback_data: "image_quality:hd" }],
+          [{ text: "← В меню", callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("image_model:")) {
+    const modelId = data.slice("image_model:".length);
+    const model = await env.DB.prepare("SELECT subscription_only FROM models WHERE id=?1 AND type='image' AND enabled=1").bind(modelId).first<{ subscription_only:number }>();
+    if (!model) throw new Error("image_model_unavailable");
+    if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
+      await sendTelegramMessage(botToken, chatId, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      return true;
+    }
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.imageModelId = modelId;
+    await setUiPreferences(env.DB, userId, prefs);
+    await setMode(env.DB, userId, "image", now);
+    await sendTelegramMessage(botToken, chatId, "Модель изображения выбрана. Отправьте описание.");
+    return true;
+  }
+
+  if (data.startsWith("image_size:")) {
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.imageSize = data.slice("image_size:".length);
+    await setUiPreferences(env.DB, userId, prefs);
+    await sendTelegramMessage(botToken, chatId, "Размер сохранён.");
+    return true;
+  }
+
+  if (data.startsWith("image_quality:")) {
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.imageQuality = data.slice("image_quality:".length);
+    await setUiPreferences(env.DB, userId, prefs);
+    await sendTelegramMessage(botToken, chatId, "Качество сохранено.");
+    return true;
+  }
+
+  if (data === "menu:model") {
+    const models = await listSelectableModels(env.DB, { userId, type: "chat", now });
+    await sendTelegramMessage(botToken, chatId, "📚 Сменить модель", {
+      reply_markup: {
+        inline_keyboard: [
+          ...models.slice(0, 10).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "model:" + model.id }]),
+          [{ text: "← В меню", callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("model:")) {
+    const modelId = data.slice("model:".length);
+    const model = await env.DB.prepare("SELECT subscription_only FROM models WHERE id=?1 AND type='chat' AND enabled=1").bind(modelId).first<{ subscription_only:number }>();
+    if (!model) throw new Error("model_unavailable");
+    if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
+      await sendTelegramMessage(botToken, chatId, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      return true;
+    }
+    const ok = await setChatModel(env.DB, userId, modelId, now);
+    await sendTelegramMessage(botToken, chatId, ok ? "Модель Chat изменена." : "Модель недоступна.", { reply_markup: mainMenuKeyboard(false) });
+    return true;
+  }
+
+  if (data === "menu:dialogs") {
+    const dialogs = await listActiveConversations(env.DB, userId);
+    await sendTelegramMessage(botToken, chatId, "📖 Мои диалоги", {
+      reply_markup: {
+        inline_keyboard: [
+          ...dialogs.slice(0, 10).map((dialog) => [{ text: dialog.title.slice(0, 45), callback_data: "dialog:" + dialog.id }, { text: "🗄", callback_data: "dialog:archive:" + dialog.id }]),
+          [{ text: "＋ Новый диалог", callback_data: "dialog:new" }],
+          [{ text: "Архив", callback_data: "dialogs:archive" }],
+          [{ text: "← В меню", callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data === "dialogs:archive") {
+    const dialogs = await listArchivedConversations(env.DB, userId);
+    await sendTelegramMessage(botToken, chatId, "🗄 Архив", {
+      reply_markup: {
+        inline_keyboard: [
+          ...dialogs.slice(0, 10).map((dialog) => [{ text: dialog.title.slice(0, 40), callback_data: "dialog:restore:" + dialog.id }, { text: "🗑", callback_data: "dialog:delete:" + dialog.id }]),
+          [{ text: "← Диалоги", callback_data: "menu:dialogs" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data === "dialog:new") {
+    const plan = await getActivePlan(env.DB, userId, now);
+    const expiresAt = new Date(Date.parse(now) + (plan?.retentionHours ?? 24) * 3_600_000).toISOString();
+    try {
+      await createNewConversation(env.DB, { userId, title: "Новый диалог", now, expiresAt });
+      await setMode(env.DB, userId, "chat", now);
+      await sendTelegramMessage(botToken, chatId, "Новый диалог создан. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+    } catch {
+      await sendTelegramMessage(botToken, chatId, "Сначала выберите доступную модель Chat.", { reply_markup: mainMenuKeyboard(false) });
+    }
+    return true;
+  }
+
+  if (data.startsWith("dialog:archive:")) {
+    await archiveConversation(env.DB, userId, data.slice("dialog:archive:".length), now);
+    await sendTelegramMessage(botToken, chatId, "Диалог отправлен в архив.");
+    return true;
+  }
+
+  if (data.startsWith("dialog:restore:")) {
+    await restoreConversation(env.DB, userId, data.slice("dialog:restore:".length), now);
+    await sendTelegramMessage(botToken, chatId, "Диалог восстановлен.");
+    return true;
+  }
+
+  if (data.startsWith("dialog:delete:")) {
+    await deleteArchivedConversation(env.DB, userId, data.slice("dialog:delete:".length), now);
+    await sendTelegramMessage(botToken, chatId, "Диалог удалён.");
+    return true;
+  }
+
+  if (data.startsWith("dialog:")) {
+    try {
+      await continueConversation(env.DB, userId, data.slice("dialog:".length), now);
+      await setMode(env.DB, userId, "chat", now);
+      await sendTelegramMessage(botToken, chatId, "Диалог продолжен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+    } catch {
+      await sendTelegramMessage(botToken, chatId, "Не удалось открыть этот диалог.");
+    }
+    return true;
+  }
+
+  if (data === "menu:tools") {
+    await sendTelegramMessage(botToken, chatId, "🧰 Инструменты", { reply_markup: toolsKeyboard() });
+    return true;
+  }
+
+  if (data === "tool:search") {
+    await setMode(env.DB, userId, "search", now);
+    const models = await listSelectableModels(env.DB, { userId, type: "search", now });
+    await sendTelegramMessage(botToken, chatId, "🔎 Search Mode\nВыберите модель и затем отправьте запрос.", {
+      reply_markup: {
+        inline_keyboard: [
+          ...models.slice(0, 8).map((model) => [{ text: (model.subscriptionOnly ? "🔒 " : "") + model.displayName + " · " + model.pointsCost + " б.", callback_data: "search_model:" + model.id }]),
+          [{ text: "← В меню", callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("search_model:")) {
+    const modelId = data.slice("search_model:".length);
+    const models = await listSelectableModels(env.DB, { userId, type: "search", now });
+    const model = models.find((item) => item.id === modelId);
+    if (!model) throw new Error("search_model_unavailable");
+    if (model.subscriptionOnly && !(await getActivePlan(env.DB, userId, now))) {
+      await sendTelegramMessage(botToken, chatId, "Эта модель доступна по подписке.\n\n[Тарифы]");
+      return true;
+    }
+    const prefs = await getUiPreferences(env.DB, userId);
+    prefs.searchModelId = modelId;
+    await setUiPreferences(env.DB, userId, prefs);
+    await setMode(env.DB, userId, "search", now);
+    await sendTelegramMessage(botToken, chatId, "Search-модель выбрана. Отправьте запрос.");
+    return true;
+  }
+
+  if (data === "tool:documents") {
+    await enterDocumentsMode(env.DB, userId, now);
+    await sendTelegramMessage(botToken, chatId, "📄 Documents Mode включён. PDF/DOCX/TXT до 10 МБ.");
+    return true;
+  }
+
+  if (data === "tool:voice") {
+    const mode = await enterVoiceMode(env.DB, userId, now);
+    await sendTelegramMessage(botToken, chatId, mode.ok ? "🎙 Voice Mode включён. Отправьте голосовое сообщение." : "Voice Mode доступен только по активной подписке.");
+    return true;
+  }
+
+  if (data === "tool:roles") {
+    const roles = await listEnabledRoles(env.DB);
+    await sendTelegramMessage(botToken, chatId, "🎭 Roles", {
+      reply_markup: {
+        inline_keyboard: [
+          ...roles.slice(0, 10).map((role) => [{ text: role.name, callback_data: "role:" + role.id }]),
+          [{ text: "← В меню", callback_data: "menu:chat" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("role:")) {
+    const current = await env.DB.prepare("SELECT active_conversation_id FROM users WHERE id=?1").bind(userId).first<{ active_conversation_id: string | null }>();
+    if (!current?.active_conversation_id) {
+      await sendTelegramMessage(botToken, chatId, "Сначала создайте или откройте диалог.");
+      return true;
+    }
+    const ok = await setConversationRole(env.DB, userId, current.active_conversation_id, data.slice("role:".length), now);
+    await sendTelegramMessage(botToken, chatId, ok ? "Роль применена." : "Роль недоступна.");
+    return true;
+  }
+
+  if (data === "tool:chat") {
+    await setMode(env.DB, userId, "chat", now);
+    await sendTelegramMessage(botToken, chatId, "💬 Chat активен. Отправьте сообщение.", { reply_markup: mainMenuKeyboard(false) });
+    return true;
+  }
+
+  if (data === "menu:account") {
+    await sendTelegramMessage(botToken, chatId, await accountSummary(env.DB, userId, now), { reply_markup: accountKeyboard() });
+    return true;
+  }
+
+  if (data === "account:plans") {
+    const plans = await env.DB.prepare("SELECT id,name,price_stars,daily_points,retention_hours,voice_enabled FROM plans WHERE enabled=1 ORDER BY duration_days").all<{id:string;name:string;price_stars:number;daily_points:number;retention_hours:number;voice_enabled:number}>();
+    await sendTelegramMessage(botToken, chatId, "Тарифы", {
+      reply_markup: {
+        inline_keyboard: [
+          ...(plans.results ?? []).map((plan) => [{ text: plan.name + " · " + plan.price_stars + " ⭐", callback_data: "plan_buy:" + plan.id }]),
+          [{ text: "← В аккаунт", callback_data: "menu:account" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data === "account:orders") {
+    const orders = await env.DB.prepare("SELECT id,plan_id,status,amount,currency,created_at FROM orders WHERE user_id=?1 ORDER BY created_at DESC LIMIT 10").bind(userId).all<{id:string;plan_id:string;status:string;amount:number;currency:string;created_at:string}>();
+    const text = (orders.results ?? []).map((order) => "#" + order.id.slice(0, 8) + " · " + order.plan_id + " · " + order.status + " · " + order.amount + " " + order.currency).join("\n") || "Заказов пока нет.";
+    await sendTelegramMessage(botToken, chatId, "Мои заказы\n\n" + text, { reply_markup: accountKeyboard() });
+    return true;
+  }
+
+  if (data === "account:language") {
+    await sendTelegramMessage(botToken, chatId, "Язык интерфейса", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Русский", callback_data: "lang:ru" }, { text: "English", callback_data: "lang:en" }],
+          [{ text: "O'zbek", callback_data: "lang:uz" }, { text: "Français", callback_data: "lang:fr" }],
+          [{ text: "Deutsch", callback_data: "lang:de" }],
+          [{ text: "← Аккаунт", callback_data: "menu:account" }],
+        ],
+      },
+    });
+    return true;
+  }
+
+  if (data.startsWith("lang:")) {
+    const language = data.slice("lang:".length);
+    if (!["ru", "en", "uz", "fr", "de"].includes(language)) throw new Error("invalid_language");
+    await env.DB.prepare("UPDATE users SET language=?2,updated_at=?3 WHERE id=?1").bind(userId, language, now).run();
+    await sendTelegramMessage(botToken, chatId, "Язык сохранён.", { reply_markup: accountKeyboard() });
+    return true;
+  }
+
+  if (data === "menu:help") {
+    await sendTelegramMessage(botToken, chatId, "❓ Помощь\n\nChat — обычный диалог. Search — интернет-поиск с источниками. Documents — вопросы по PDF/DOCX/TXT. Voice — голосовые ответы по активной подписке. /paysupport — поддержка платежей.", { reply_markup: mainMenuKeyboard(false) });
+    return true;
+  }
+
+  if (data === "menu:admin") {
+    if (await isAdminTelegramUser(env, telegramUserId)) {
+      const adminUrl = new URL("/admin", requestUrl).toString();
+      await sendTelegramMessage(botToken, chatId, "Открыть Veylora Admin:", { reply_markup: { inline_keyboard: [[{ text: "🛠 Open Admin Mini App", web_app: { url: adminUrl } }]] } });
+    } else {
+      await sendTelegramMessage(botToken, chatId, "Недостаточно прав.");
+    }
+    return true;
+  }
+
+  return false;
+}
+
+export async function handleImageText(
+  env: Env,
+  userId: string,
+  chatId: number,
+  telegramUpdateId: number,
+  text: string,
+  now: string,
+): Promise<boolean> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("image_runtime_secrets_missing");
+  const prefs = await getUiPreferences(env.DB, userId);
+  const result = await handleImageRequest({
+    db: env.DB,
+    queue: env.AI_JOBS,
+    userId,
+    prompt: text,
+    modelId: typeof prefs.imageModelId === "string" ? prefs.imageModelId : undefined,
+    size: typeof prefs.imageSize === "string" ? prefs.imageSize : undefined,
+    quality: typeof prefs.imageQuality === "string" ? prefs.imageQuality : undefined,
+    telegramUpdateId,
+    chatId,
+    now,
+    encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
+  });
+  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "error" in result ? "Не удалось принять запрос на изображение: " + result.error : "🎨 Генерация изображения запущена.");
+  return true;
+}
+
+export async function handleSearchText(
+  env: Env,
+  userId: string,
+  chatId: number,
+  telegramUpdateId: number,
+  text: string,
+  now: string,
+): Promise<boolean> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
+  const prefs = await getUiPreferences(env.DB, userId);
+  const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
+  const outcome = await executeSearch({
+    db: env.DB,
+    gateway,
+    userId,
+    query: text,
+    modelId: typeof prefs.searchModelId === "string" ? prefs.searchModelId : undefined,
+    telegramUpdateId,
+    now,
+    searxngUrl: env.SEARXNG_URL,
+    credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
+  });
+  await deliverSearchOutcome(env, userId, chatId, outcome);
+  return true;
+}
+
+async function deliverSearchOutcome(env: Env, userId: string, chatId: number, outcome: SearchOutcome): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
+  if (outcome.kind === "answered") {
+    let telegramDelivered = false;
+    try {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
+      telegramDelivered = true;
+      if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");
+    } catch (error) {
+      if (!telegramDelivered) {
+        await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
+        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Не удалось доставить результат поиска. Баллы за не доставленный ответ не списаны.").catch(() => false);
+      }
+    }
+    return;
+  }
+  const message = outcome.kind === "no_result" ? "Результат не найден. Попробуйте изменить запрос." : outcome.kind === "insufficient_points" ? "У вас закончились баллы для Search Mode." : "Не удалось выполнить поиск. Попробуйте ещё раз.";
+  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
+}
+
+async function isAdminTelegramUser(env: Env, telegramUserId: number): Promise<boolean> {
+  const configuredOwnerId = Number(env.ADMIN_OWNER_TELEGRAM_ID);
+  if (Number.isSafeInteger(configuredOwnerId) && configuredOwnerId > 0 && telegramUserId === configuredOwnerId) return true;
+  const row = await env.DB.prepare("SELECT 1 AS ok FROM users u JOIN admin_roles r ON r.user_id=u.id WHERE u.telegram_user_id=?1").bind(telegramUserId).first<{ ok: number }>();
+  return row?.ok === 1;
+}
+
+async function setMode(db: D1Database, userId: string, mode: string, now: string): Promise<void> {
+  await db.prepare("UPDATE users SET active_mode=?2,updated_at=?3 WHERE id=?1").bind(userId, mode, now).run();
+}
+
+async function getUiPreferences(db: D1Database, userId: string): Promise<UserPrefs> {
+  const row = await db.prepare("SELECT ui_preferences FROM user_settings WHERE user_id=?1").bind(userId).first<{ ui_preferences: string }>();
+  try {
+    const parsed = JSON.parse(row?.ui_preferences ?? "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as UserPrefs : {};
+  } catch {
+    return {};
+  }
+}
+
+async function setUiPreferences(db: D1Database, userId: string, prefs: UserPrefs): Promise<void> {
+  await db.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(userId, JSON.stringify(prefs)).run();
+}
+
+async function accountSummary(db: D1Database, userId: string, now: string): Promise<string> {
+  const user = await db.prepare("SELECT daily_points_remaining,bonus_points,language FROM users WHERE id=?1").bind(userId).first<{ daily_points_remaining: number; bonus_points: number; language: string }>();
+  const plan = await getActivePlan(db, userId, now);
+  return "👤 Аккаунт\n\nПодписка: " + (plan?.name ?? "Free") + "\nБаллы: " + (user?.daily_points_remaining ?? 0) + "\nБонусы: " + (user?.bonus_points ?? 0) + "\nЯзык: " + (user?.language ?? "ru");
+}
