@@ -63,7 +63,8 @@ export async function handleStartCommand(
       await sendTelegramMessage(botToken, chatId, t(locale, "admin.denied"));
       return true;
     }
-    const adminUrl = new URL("/admin", requestUrl).toString();
+    const configuredAdminUrl = env.ADMIN_WEBAPP_URL?.trim();
+    const adminUrl = configuredAdminUrl || new URL("/admin", requestUrl).toString();
     await sendTelegramMessage(botToken, chatId, t(locale, "admin.open"), {
       reply_markup: { inline_keyboard: [[{ text: t(locale, "admin.button"), web_app: { url: adminUrl } }]] },
     });
