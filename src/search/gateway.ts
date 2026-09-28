@@ -5,6 +5,10 @@ export type SearchProviderConfig = {
   fallbackUrl?: string;
   enabled: boolean;
   maxQueryChars: number;
+  language: string;
+  categories: string;
+  timeRange: string;
+  safeSearch: number;
   authToken?: string;
 };
 
@@ -13,11 +17,15 @@ export async function getSearchProviderConfig(
   envPrimaryUrl?: string,
   envAuthToken?: string,
 ): Promise<SearchProviderConfig> {
-  const [enabled, primary, fallback, maxQuery, token] = await Promise.all([
+  const [enabled, primary, fallback, maxQuery, language, categories, timeRange, safeSearch, token] = await Promise.all([
     getSystemConfig(db, "search.enabled"),
     getSystemConfig(db, "search.primary_url"),
     getSystemConfig(db, "search.fallback_url"),
     getSystemConfig(db, "search.max_query_chars"),
+    getSystemConfig(db, "search.language"),
+    getSystemConfig(db, "search.categories"),
+    getSystemConfig(db, "search.time_range"),
+    getSystemConfig(db, "search.safe_search"),
     getSystemConfig(db, "search.auth_token"),
   ]);
 
@@ -28,6 +36,10 @@ export async function getSearchProviderConfig(
     ...(fallbackUrl ? { fallbackUrl } : {}),
     enabled: enabled !== "0",
     maxQueryChars: Math.max(100, Math.min(5000, Number(maxQuery) || 1000)),
+    language: language?.trim() || "all",
+    categories: categories?.trim() || "general",
+    timeRange: timeRange?.trim() || "",
+    safeSearch: Math.max(0, Math.min(2, Number(safeSearch) || 0)),
     ...(token?.trim() || envAuthToken?.trim() ? { authToken: token?.trim() || envAuthToken?.trim() } : {}),
   };
 }
@@ -48,7 +60,7 @@ export async function searchViaGateway(
       const url = new URL("/search", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
       url.searchParams.set("q", query);
       url.searchParams.set("format", "json");
-      url.searchParams.set("categories", "general");
+      url.searchParams.set("categories", config.categories);\n      if (config.language && config.language !== "all") url.searchParams.set("language", config.language);\n      if (config.timeRange) url.searchParams.set("time_range", config.timeRange);\n      url.searchParams.set("safesearch", String(config.safeSearch));
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort("search_timeout"), timeoutMs);
       try {
