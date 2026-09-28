@@ -88,6 +88,13 @@ export async function processDocumentUploadJob(
   }
 
   try {
+    await transitionOperation(deps.db, {
+      operationId: message.operationId,
+      userId: message.userId,
+      to: "processing",
+      now: deps.now(),
+    });
+
     if (existingSessionId) {
       await transitionOperation(deps.db, {
         operationId: message.operationId,
