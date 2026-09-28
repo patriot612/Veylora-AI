@@ -84,6 +84,7 @@ export async function handleTelegramCallback(
   callbackId: string | undefined,
   data: string,
   now: string,
+  callbackMessageId?: number,
 ): Promise<boolean> {
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) throw new Error("telegram_bot_token_missing");
