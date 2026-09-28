@@ -523,13 +523,14 @@ async function audit(env: Env) {
 
 async function config(env: Env, request: Request, session: AdminSession) {
   if (request.method === "GET") {
-    const rows = await env.DB.prepare("SELECT config_key,config_value,updated_by_user_id,updated_at FROM system_config ORDER BY config_key").all();
-    return Response.json({ ok: true, rows: rows.results ?? [] }, { headers: noStore() });
+    const rows = await env.DB.prepare("SELECT config_key,config_value,updated_by_user_id,updated_at FROM system_config ORDER BY config_key").all<{config_key:string;config_value:string;updated_by_user_id:string|null;updated_at:string}>();
+    const safeRows = (rows.results ?? []).filter((row) => !isSensitiveConfigKey(row.config_key));
+    return Response.json({ ok: true, rows: safeRows }, { headers: noStore() });
   }
   if (request.method !== "PUT") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
   assertPermission(session, "system.write");
   const body = await request.json<{ key?: unknown; value?: unknown }>();
-  if (typeof body.key !== "string" || body.key.length < 1 || body.key.length > 200) return Response.json({ error: "invalid_key" }, { status: 400, headers: noStore() });
+  if (typeof body.key !== "string" || body.key.length < 1 || body.key.length > 200) return Response.json({ error: "invalid_key" }, { status: 400, headers: noStore() });\n  if (isSensitiveConfigKey(body.key)) return Response.json({ error: "sensitive_config_key_not_allowed" }, { status: 403, headers: noStore() });
   const value = typeof body.value === "string" ? body.value : JSON.stringify(body.value);
   if (value.length > 10_000) return Response.json({ error: "value_too_large" }, { status: 413, headers: noStore() });
   const actor = await env.DB.prepare("SELECT id FROM users WHERE telegram_user_id=?1").bind(session.identity.id).first<{id:string}>();
@@ -550,3 +551,8 @@ async function writeAudit(db: D1Database, actorUserId: string | null, eventType:
   await db.prepare("INSERT INTO audit_log(id,actor_user_id,event_type,target_type,target_id,safe_metadata,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)").bind(crypto.randomUUID(), actorUserId, eventType, targetType, targetId, JSON.stringify({ role }), new Date().toISOString()).run();
 }
 function noStore(): HeadersInit { return { "cache-control": "no-store" }; }
+
+
+function isSensitiveConfigKey(key: string): boolean {
+  return /(secret|token|password|api[_-]?key|credential)/i.test(key);
+}
