@@ -30,8 +30,8 @@ async function seedUser(modelCost = 4, points = 50) {
 }
 
 function harness() {
-  let sent: string[] = [];
-  let edited: string[] = [];
+  const sent: string[] = [];
+  const edited: string[] = [];
   let editsShouldFail = false;
   return {
     send: async (text: string) => {
@@ -93,7 +93,7 @@ describe("Chat service", () => {
   });
 
   it("releases reservation on provider failure and does not keep a turn", async () => {
-    const { userId, modelId } = await seedUser(7, 50);
+    const { userId } = await seedUser(7, 50);
     const h = harness();
     const gateway = {
       generateText: async () => {
@@ -128,13 +128,13 @@ describe("Chat service", () => {
   });
 
   it("blocks insufficient points before calling the gateway", async () => {
-    const { userId, modelId } = await seedUser(60, 50);
+    const { userId } = await seedUser(60, 50);
     const h = harness();
     let calls = 0;
     const gateway = {
       generateText: async () => {
         calls += 1;
-        return { text: "unexpected", modelId };
+        return { text: "unexpected" };
       },
     } as unknown as ReturnType<typeof createAIGateway>;
 
@@ -158,7 +158,7 @@ describe("Chat service", () => {
   });
 
   it("rejects a second request while the user has an active operation", async () => {
-    const { userId } = await seedUser(4, 50);
+    const { userId, modelId } = await seedUser(4, 50);
     await env.DB.prepare("UPDATE users SET active_operation_id='already-busy' WHERE id=?1").bind(userId).run();
     const h = harness();
     let calls = 0;
