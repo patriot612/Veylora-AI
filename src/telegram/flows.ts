@@ -11,6 +11,7 @@ import { getUserLocale, normalizeLocale, t } from "../i18n";
 import { getSystemConfigInt } from "../config";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
 import { createAIGateway } from "../ai-gateway";
+import { handleChatMessage } from "../chat/service";
 import { createDefaultProviderAdapters } from "../providers/factory";
 
 type UserPrefs = Record<string, unknown>;
@@ -47,7 +48,9 @@ export async function handleStartCommand(
         "UPDATE users SET active_chat_model_id=COALESCE(active_chat_model_id,?2),active_mode='chat',updated_at=?3 WHERE id=?1",
       ).bind(userId, defaultModel.config_value, now).run();
     }
-    const mainMenu = await sendTelegramMessage(botToken, chatId, t(locale, "start.greeting"), { reply_markup: mainMenuKeyboard(false, locale) });
+    await sendTelegramMessage(botToken, chatId, t(locale, "start.greeting"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const mainMenu = await sendTelegramMessage(botToken, chatId, "", { reply_markup: mainMenuKeyboard(false, locale) });
     const prefs = await getUiPreferences(env.DB, userId);
     prefs.mainMenuMessageId = mainMenu.message_id;
     await setUiPreferences(env.DB, userId, prefs);
