@@ -81,9 +81,9 @@ describe("heavy queue consumer", () => {
     let calls = 0;
     const first = fakeMessage(queue.sent[0]);
     const handler = async () => { calls += 1; return { ok: true } as const; };
-    const result = await processQueueMessage(first, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: handler, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) } });
+    const result = await processQueueMessage(first, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: handler, voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) } });
     const second = fakeMessage(queue.sent[0]);
-    await processQueueMessage(second, { db: env.DB, now: () => "2026-09-28T12:02:00Z", handlers: { image: handler, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) } });
+    await processQueueMessage(second, { db: env.DB, now: () => "2026-09-28T12:02:00Z", handlers: { image: handler, voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) } });
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
     const op = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
     const job = await env.DB.prepare("SELECT status FROM queue_jobs WHERE operation_id=?1").bind(operationId).first<{status:string}>();
@@ -116,7 +116,7 @@ describe("heavy queue consumer", () => {
     const deps = {
       db: env.DB,
       now: () => "2026-09-28T12:01:00Z",
-      handlers: { image: handler, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) },
+      handlers: { image: handler, voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) },
     };
 
     const first = processQueueMessage(fakeMessage(queue.sent[0]), deps);
@@ -170,7 +170,7 @@ describe("heavy queue consumer", () => {
     await env.DB.prepare("UPDATE operations SET status='delivering', telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2").bind(operationId, userId).run();
     let handlerCalls = 0;
     const message = fakeMessage(queue.sent[0]);
-    const result = await processQueueMessage(message, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: async () => { handlerCalls += 1; return { ok: true }; }, voice: async () => ({ ok: true }), document: async () => ({ ok: true }) } });
+    const result = await processQueueMessage(message, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: async () => { handlerCalls += 1; return { ok: true }; }, voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) } });
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
     const op = await env.DB.prepare("SELECT status FROM operations WHERE id=?1").bind(operationId).first<{status:string}>();
     const reservation = await env.DB.prepare("SELECT status FROM point_reservations WHERE operation_id=?1").bind(operationId).first<{status:string}>();
@@ -191,7 +191,7 @@ describe("heavy queue consumer", () => {
     const queue = fakeQueue();
     await enqueueHeavyJob({ db: env.DB, queue, operationId, userId, jobType: "image", pointsCost: 9, now: "2026-09-28T12:00:00Z" });
     const message = fakeMessage(queue.sent[0]);
-    const result = await processQueueMessage(message, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: async () => ({ ok: false, retryable: true, code: "provider_503" }), voice: async () => ({ ok: true }), document: async () => ({ ok: true }) } });
+    const result = await processQueueMessage(message, { db: env.DB, now: () => "2026-09-28T12:01:00Z", handlers: { image: async () => ({ ok: false, retryable: true, code: "provider_503" }), voice: async () => ({ ok: true } as const), document: async () => ({ ok: true } as const) } });
     const user = await env.DB.prepare("SELECT daily_points_remaining FROM users WHERE id=?1").bind(userId).first<{daily_points_remaining:number}>();
     expect(result).toBe("retried");
     expect(message.retried).toBe(true);
