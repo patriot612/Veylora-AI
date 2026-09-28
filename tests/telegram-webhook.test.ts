@@ -2,7 +2,7 @@ import { exports as workerExports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { env } from "./test-env";
 
-const worker = workerExports as unknown as { default: ExportedHandler<Env> };
+const worker = workerExports as unknown as { default: { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> } };
 
 describe("Telegram webhook integration", () => {
   it("claims an update once and returns duplicate for a repeated update_id", async () => {
