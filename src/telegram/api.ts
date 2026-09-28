@@ -124,7 +124,8 @@ export async function sendTelegramPhoto(
     if (value !== undefined) form.set(key, typeof value === "string" ? value : JSON.stringify(value));
   }
   const type = source.contentType ?? "image/png";
-  form.set("photo", new File([source.bytes], "image." + (type === "image/jpeg" ? "jpg" : "png"), { type }));
+  const photoBuffer = source.bytes.buffer.slice(source.bytes.byteOffset, source.bytes.byteOffset + source.bytes.byteLength) as ArrayBuffer;
+  form.set("photo", new File([photoBuffer], "image." + (type === "image/jpeg" ? "jpg" : "png"), { type }));
 
   const response = await fetchImpl(
     "https://api.telegram.org/bot" + botToken + "/sendPhoto",
