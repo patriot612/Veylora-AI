@@ -530,7 +530,8 @@ async function config(env: Env, request: Request, session: AdminSession) {
   if (request.method !== "PUT") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
   assertPermission(session, "system.write");
   const body = await request.json<{ key?: unknown; value?: unknown }>();
-  if (typeof body.key !== "string" || body.key.length < 1 || body.key.length > 200) return Response.json({ error: "invalid_key" }, { status: 400, headers: noStore() });\n  if (isSensitiveConfigKey(body.key)) return Response.json({ error: "sensitive_config_key_not_allowed" }, { status: 403, headers: noStore() });
+  if (typeof body.key !== "string" || body.key.length < 1 || body.key.length > 200) return Response.json({ error: "invalid_key" }, { status: 400, headers: noStore() });
+  if (isSensitiveConfigKey(body.key)) return Response.json({ error: "sensitive_config_key_not_allowed" }, { status: 403, headers: noStore() });
   const value = typeof body.value === "string" ? body.value : JSON.stringify(body.value);
   if (value.length > 10_000) return Response.json({ error: "value_too_large" }, { status: 413, headers: noStore() });
   const actor = await env.DB.prepare("SELECT id FROM users WHERE telegram_user_id=?1").bind(session.identity.id).first<{id:string}>();
