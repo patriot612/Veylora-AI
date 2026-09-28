@@ -202,6 +202,7 @@ export default {
               telegramUpdateId: envelope.update_id,
               now,
               searxngUrl: env.SEARXNG_URL,
+              searchAuthToken: env.SEARXNG_AUTH_TOKEN,
               credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
             });
             if (outcome.kind === "answered") {
