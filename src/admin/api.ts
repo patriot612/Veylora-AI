@@ -85,7 +85,7 @@ async function users(env: Env, request: Request, session: AdminSession, segments
     if (!(await grantBonusPoints(env.DB, user.id, amount, new Date().toISOString()))) {
       return Response.json({ error: "bonus_grant_failed" }, { status: 409, headers: noStore() });
     }
-    await writeAudit(env.DB, user.id, "bonus.grant", "user", user.id, session.role);
+    await writeAudit(env.DB, await adminActorId(env.DB, session), "bonus.grant", "user", user.id, session.role);
     return Response.json({ ok: true, amount }, { headers: noStore() });
   }
 
@@ -139,7 +139,7 @@ async function models(env: Env, request: Request, session: AdminSession, segment
   bindings.push(new Date().toISOString());
   const result = await env.DB.prepare("UPDATE models SET " + updates.join(",") + " WHERE id=?"+(bindings.length + 1)).bind(...bindings, modelId).run();
   if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "model_not_found" }, { status: 404, headers: noStore() });
-  await writeAudit(env.DB, null, "model.update", "model", modelId, session.role);
+  await writeAudit(env.DB, await adminActorId(env.DB, session), "model.update", "model", modelId, session.role);
   return Response.json({ ok: true }, { headers: noStore() });
 }
 
@@ -157,7 +157,7 @@ async function roles(env: Env, request: Request, session: AdminSession, segments
   if (request.method === "DELETE") {
     const result = await env.DB.prepare("DELETE FROM ai_roles WHERE id=?1").bind(id).run();
     if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "role_not_found" }, { status: 404, headers: noStore() });
-    await writeAudit(env.DB, null, "role.delete", "role", id, session.role);
+    await writeAudit(env.DB, await adminActorId(env.DB, session), "role.delete", "role", id, session.role);
     return Response.json({ ok: true }, { headers: noStore() });
   }
   if (request.method !== "PUT" && request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
@@ -168,7 +168,7 @@ async function roles(env: Env, request: Request, session: AdminSession, segments
   const enabled = body.enabled === false ? 0 : 1;
   const result = await env.DB.prepare("INSERT INTO ai_roles(id,name,description,system_prompt,enabled,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?6) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,system_prompt=excluded.system_prompt,enabled=excluded.enabled,updated_at=excluded.updated_at").bind(id, body.name.trim(), body.description, body.systemPrompt, enabled, new Date().toISOString()).run();
   if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "role_write_failed" }, { status: 409, headers: noStore() });
-  await writeAudit(env.DB, null, "role.write", "role", id, session.role);
+  await writeAudit(env.DB, await adminActorId(env.DB, session), "role.write", "role", id, session.role);
   return Response.json({ ok: true, id }, { headers: noStore() });
 }
 
@@ -182,7 +182,7 @@ async function templates(env: Env, request: Request, session: AdminSession, segm
   if (request.method === "DELETE") {
     const result = await env.DB.prepare("DELETE FROM image_templates WHERE id=?1").bind(id).run();
     if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "template_not_found" }, { status: 404, headers: noStore() });
-    await writeAudit(env.DB, null, "template.delete", "template", id, session.role);
+    await writeAudit(env.DB, await adminActorId(env.DB, session), "template.delete", "template", id, session.role);
     return Response.json({ ok: true }, { headers: noStore() });
   }
   if (request.method !== "PUT" && request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405, headers: noStore() });
@@ -194,7 +194,7 @@ async function templates(env: Env, request: Request, session: AdminSession, segm
   if (!Number.isSafeInteger(extra) || extra < 0) return Response.json({ error: "invalid_extra_points_cost" }, { status: 400, headers: noStore() });
   const enabled = body.enabled === false ? 0 : 1;
   await env.DB.prepare("INSERT INTO image_templates(id,name,description,prompt_template,extra_points_cost,enabled,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?7) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,prompt_template=excluded.prompt_template,extra_points_cost=excluded.extra_points_cost,enabled=excluded.enabled,updated_at=excluded.updated_at").bind(id, body.name.trim(), body.description, body.promptTemplate, extra, enabled, new Date().toISOString()).run();
-  await writeAudit(env.DB, null, "template.write", "template", id, session.role);
+  await writeAudit(env.DB, await adminActorId(env.DB, session), "template.write", "template", id, session.role);
   return Response.json({ ok: true, id }, { headers: noStore() });
 }
 
@@ -220,7 +220,7 @@ async function plans(env: Env, request: Request, session: AdminSession, segments
   bindings.push(new Date().toISOString());
   const result = await env.DB.prepare("UPDATE plans SET " + updates.join(",") + " WHERE id=?"+(bindings.length + 1)).bind(...bindings, id).run();
   if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "plan_not_found" }, { status: 404, headers: noStore() });
-  await writeAudit(env.DB, null, "plan.update", "plan", id, session.role);
+  await writeAudit(env.DB, await adminActorId(env.DB, session), "plan.update", "plan", id, session.role);
   return Response.json({ ok: true }, { headers: noStore() });
 }
 
@@ -249,7 +249,7 @@ async function payments(env: Env, request: Request, session: AdminSession, segme
     env.DB.prepare("UPDATE payments SET status='refunded' WHERE order_id=?1 AND status='paid'").bind(orderId),
     env.DB.prepare("UPDATE subscriptions SET status='refunded',updated_at=?2 WHERE user_id=?1 AND plan_id=?3 AND status='active'").bind(order.user_id, now, order.plan_id),
   ]);
-  await writeAudit(env.DB, order.user_id, "payment.refund", "order", orderId, session.role);
+  await writeAudit(env.DB, await adminActorId(env.DB, session), "payment.refund", "order", orderId, session.role);
   return Response.json({ ok: true }, { headers: noStore() });
 }
 async function search(env: Env) {
@@ -306,6 +306,14 @@ async function config(env: Env, request: Request, session: AdminSession) {
   await env.DB.prepare("INSERT INTO system_config(config_key,config_value,updated_by_user_id,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value, updated_by_user_id=excluded.updated_by_user_id, updated_at=excluded.updated_at").bind(body.key, value, actor?.id ?? null, new Date().toISOString()).run();
   await writeAudit(env.DB, actor?.id ?? null, "config.update", "system_config", body.key, session.role);
   return Response.json({ ok: true }, { headers: noStore() });
+}
+
+async function adminActorId(db: D1Database, session: AdminSession): Promise<string | null> {
+  const actor = await db
+    .prepare("SELECT id FROM users WHERE telegram_user_id=?1")
+    .bind(session.identity.id)
+    .first<{ id: string }>();
+  return actor?.id ?? null;
 }
 
 async function writeAudit(db: D1Database, actorUserId: string | null, eventType: string, targetType: string, targetId: string, role: string) {
