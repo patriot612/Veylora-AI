@@ -11,7 +11,7 @@ import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
 import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
-import { answerDocumentQuestion, enterDocumentsMode, enqueueDocumentUpload, exitDocumentsMode, processDocumentUploadJob } from "./documents/service";
+import { answerDocumentQuestion, enterDocumentsMode, enqueueDocumentUpload, processDocumentUploadJob } from "./documents/service";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
