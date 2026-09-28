@@ -22,6 +22,22 @@ export async function runScheduledCleanup(db: D1Database, now: string): Promise<
     if (await settleReservation(db, row.id, now)) settledDeliveries += 1;
   }
 
+  const expiredConversations = await db
+    .prepare("SELECT id FROM conversations WHERE expires_at <= ?1")
+    .bind(now)
+    .all<{ id: string }>();
+  await db.prepare(
+    "UPDATE users SET active_conversation_id=NULL, updated_at=?1 WHERE active_conversation_id IN (SELECT id FROM conversations WHERE expires_at <= ?1)",
+  ).bind(now).run();
+  let deletedConversationTurns = 0;
+  if ((expiredConversations.results ?? []).length > 0) {
+    const placeholders = expiredConversations.results!.map(() => "?").join(",");
+    const ids = expiredConversations.results!.map((row) => row.id);
+    const turnDelete = await db.prepare(`DELETE FROM conversation_turns WHERE conversation_id IN (${placeholders})`).bind(...ids).run();
+    deletedConversationTurns = turnDelete.meta.changes ?? 0;
+    await db.prepare(`DELETE FROM conversations WHERE id IN (${placeholders})`).bind(...ids).run();
+  }
+
   const expiredSessions = await db.prepare("SELECT COUNT(*) AS count FROM document_sessions WHERE expires_at <= ?1").bind(now).first<{ count: number }>();
 
   await db.prepare("UPDATE users SET active_document_session_id=NULL, updated_at=?1 WHERE active_document_session_id IN (SELECT id FROM document_sessions WHERE expires_at <= ?1)").bind(now).run();
@@ -36,6 +52,8 @@ export async function runScheduledCleanup(db: D1Database, now: string): Promise<
     documentSessions: expiredSessions?.count ?? 0,
     documentChunks: deletedChunks.meta.changes ?? 0,
     subscriptions: expiredSubscriptions.meta.changes ?? 0,
+    expiredConversations: expiredConversations.results?.length ?? 0,
+    deletedConversationTurns,
     settledDeliveries,
     rateLimitBuckets,
   };
