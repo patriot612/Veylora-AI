@@ -8,6 +8,17 @@
   "vars": {
     "ENVIRONMENT": "production"
   },
+  "secrets": {
+    "required": [
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_WEBHOOK_SECRET",
+      "CREDENTIAL_ENCRYPTION_KEY",
+      "SEARXNG_URL",
+      "SEARXNG_AUTH_TOKEN",
+      "ADMIN_OWNER_TELEGRAM_ID",
+      "ADMIN_WEBAPP_URL"
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",
