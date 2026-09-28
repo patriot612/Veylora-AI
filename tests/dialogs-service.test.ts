@@ -41,8 +41,8 @@ async function seedUser() {
   ).bind(modelId, providerId, credentialId).run();
 
   await env.DB.prepare(
-    "INSERT INTO ai_roles (id,name,description,system_prompt,enabled,created_at,updated_at) VALUES (?1,'Role Test','Test','You are helpful',1,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')",
-  ).bind("role_" + seq).run();
+    "INSERT INTO ai_roles (id,name,description,system_prompt,enabled,created_at,updated_at) VALUES (?1,?2,'Test','You are helpful',1,'2026-09-28T12:00:00Z','2026-09-28T12:00:00Z')",
+  ).bind("role_" + seq, "Role Test " + seq).run();
 
   return { userId, modelId, roleId: "role_" + seq };
 }
