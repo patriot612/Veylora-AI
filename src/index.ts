@@ -1,5 +1,9 @@
+import { createAIGateway } from "./ai-gateway";
+import { createDefaultProviderAdapters } from "./providers/factory";
+import { handleChatMessage } from "./chat/service";
 import { claimTelegramUpdate, markTelegramUpdate, upsertTelegramUser } from "./db/telegram";
 import { hasValidWebhookSecret, isTelegramWebhookPath, jsonResponse } from "./http";
+import { editTelegramMessage, sendTelegramMessage } from "./telegram/api";
 import { classifyTelegramUpdate } from "./telegram/router";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
@@ -49,14 +53,62 @@ export default {
           return jsonResponse({ ok: true, ignored: true });
         }
 
-        // Business routing is intentionally introduced in later stages. This boundary
-        // establishes authenticated identity and exactly-once update claiming first.
+        if (
+          envelope.kind === "text" &&
+          typeof envelope.text === "string" &&
+          typeof envelope.chat_id === "number" &&
+          typeof envelope.message_id === "number"
+        ) {
+          if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) {
+            throw new Error("telegram_chat_runtime_secrets_missing");
+          }
+
+          const gateway = createAIGateway(
+            env.DB,
+            env.CREDENTIAL_ENCRYPTION_KEY,
+            createDefaultProviderAdapters(),
+          );
+
+          await handleChatMessage({
+            db: env.DB,
+            gateway,
+            userId: user.id,
+            text: envelope.text,
+            telegramUpdateId: envelope.update_id,
+            chatId: envelope.chat_id,
+            messageId: envelope.message_id,
+            now,
+            credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
+            send: (text, options) =>
+              sendTelegramMessage(
+                env.TELEGRAM_BOT_TOKEN!,
+                envelope.chat_id!,
+                text,
+                options,
+              ),
+            edit: (messageId, text, options) =>
+              editTelegramMessage(
+                env.TELEGRAM_BOT_TOKEN!,
+                envelope.chat_id!,
+                messageId,
+                text,
+                options,
+              ),
+          });
+        }
+
         await markTelegramUpdate(env.DB, envelope.update_id, "processed", new Date().toISOString());
         return jsonResponse({ ok: true });
       } catch (error) {
         const updateId = typeof update.update_id === "number" ? update.update_id : null;
         if (updateId !== null) {
-          await markTelegramUpdate(env.DB, updateId, "failed", new Date().toISOString(), error instanceof Error ? error.message : "unknown_error");
+          await markTelegramUpdate(
+            env.DB,
+            updateId,
+            "failed",
+            new Date().toISOString(),
+            error instanceof Error ? error.message : "unknown_error",
+          );
         }
         return jsonResponse({ error: "internal_error" }, 500);
       }
