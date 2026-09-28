@@ -76,7 +76,7 @@ export default {
         }
 
         if (envelope.kind === "command" && typeof envelope.chat_id === "number") {
-          const command = extractMessageText(update);
+          const command = extractMessageText(update) ?? "";
           if (command.startsWith("/buy ")) {
             const planId = command.slice("/buy ".length).trim();
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
