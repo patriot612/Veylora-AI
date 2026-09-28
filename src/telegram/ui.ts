@@ -2,14 +2,13 @@ import { t, type Locale } from "../i18n";
 
 export type TelegramButton = { text: string; callback_data?: string; web_app?: { url: string } };
 
-export function mainMenuKeyboard(isAdmin = false, locale: Locale = "ru"): Record<string, unknown> {
+export function mainMenuKeyboard(_isAdmin = false, locale: Locale = "ru"): Record<string, unknown> {
   const rows: TelegramButton[][] = [
-    [{ text: t(locale, "menu.chat"), callback_data: "menu:chat" }, { text: t(locale, "menu.image"), callback_data: "menu:image" }],
-    [{ text: t(locale, "menu.model"), callback_data: "menu:model" }, { text: t(locale, "menu.dialogs"), callback_data: "menu:dialogs" }],
-    [{ text: t(locale, "menu.tools"), callback_data: "menu:tools" }, { text: t(locale, "menu.account"), callback_data: "menu:account" }],
-    [{ text: t(locale, "common.help"), callback_data: "menu:help" }],
+    [{ text: t(locale, "menu.chat"), callback_data: "menu:chat" }, { text: t(locale, "menu.model"), callback_data: "menu:model" }],
+    [{ text: t(locale, "menu.newDialog"), callback_data: "dialog:new" }, { text: t(locale, "menu.dialogs"), callback_data: "menu:dialogs" }],
+    [{ text: t(locale, "menu.image"), callback_data: "menu:image" }, { text: t(locale, "menu.tools"), callback_data: "menu:tools" }],
+    [{ text: t(locale, "menu.account"), callback_data: "menu:account" }, { text: t(locale, "common.help"), callback_data: "menu:help" }],
   ];
-  if (isAdmin) rows.push([{ text: t(locale, "admin.button"), callback_data: "menu:admin" }]);
   return { inline_keyboard: rows };
 }
 
