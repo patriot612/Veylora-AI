@@ -23,6 +23,7 @@ export type TelegramUpdateEnvelope = {
   message_id?: number;
   text?: string;
   callbackData?: string;
+  callbackQueryId?: string;
   document?: { fileId: string; fileName?: string; mimeType?: string; fileSize?: number };
   preCheckout?: { id: string; currency: string; totalAmount: number; invoicePayload: string };
   payment?: { currency: string; totalAmount: number; invoicePayload: string; chargeId: string };
