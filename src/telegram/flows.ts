@@ -3,6 +3,8 @@ import { getActivePlan } from "../subscriptions";
 import { listSelectableModels } from "../models/registry";
 import { createPlanInvoice } from "../payments/service";
 import { handleImageRequest } from "../image/service";
+import { enterDocumentsMode } from "../documents/service";
+import { enterVoiceMode } from "../voice/service";
 import { answerTelegramCallbackQuery, sendTelegramMessage } from "./api";
 import { accountKeyboard, mainMenuKeyboard, toolsKeyboard } from "./ui";
 import { completeSearchDelivery, executeSearch, releaseSearchDelivery, type SearchOutcome } from "../search/service";
@@ -71,6 +73,13 @@ export async function handleTelegramCallback(
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) throw new Error("telegram_bot_token_missing");
   if (callbackId) await answerTelegramCallbackQuery(botToken, callbackId).catch(() => false);
+
+  if (data.startsWith("plan_buy:")) {
+    const planId = data.slice("plan_buy:".length);
+    const invoice = await createPlanInvoice({ db: env.DB, botToken, userId, chatId, planId, now });
+    await sendTelegramMessage(botToken, chatId, "error" in invoice ? "Не удалось создать счёт: " + invoice.error : "Счёт на оплату создан.");
+    return true;
+  }
 
   if (data === "menu:chat") {
     await setMode(env.DB, userId, "chat", now);
