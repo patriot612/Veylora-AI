@@ -91,12 +91,14 @@ export function classifyTelegramUpdate(update: Record<string, unknown>): Telegra
   }
 
   if (isRecord(update.callback_query)) {
+    const callbackMessage = isRecord(update.callback_query.message) ? update.callback_query.message : null;
     return {
       update_id: updateId,
       user: asTelegramUser(update.callback_query.from),
       kind: "callback",
       ...(typeof update.callback_query.data === "string" ? { callbackData: update.callback_query.data } : {}),
-      ...(isRecord(update.callback_query.message) && typeof update.callback_query.message.chat === "object" && update.callback_query.message.chat !== null && typeof (update.callback_query.message.chat as Record<string, unknown>).id === "number" ? { chat_id: (update.callback_query.message.chat as Record<string, unknown>).id as number } : {}),
+      ...(callbackMessage && isRecord(callbackMessage.chat) && typeof callbackMessage.chat.id === "number" ? { chat_id: callbackMessage.chat.id } : {}),
+      ...(callbackMessage && typeof callbackMessage.message_id === "number" && Number.isInteger(callbackMessage.message_id) ? { message_id: callbackMessage.message_id } : {}),
     };
   }
 
