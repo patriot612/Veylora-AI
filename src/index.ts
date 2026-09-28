@@ -11,7 +11,7 @@ import { processQueueBatch } from "./queue/consumer";
 import { processDeadLetterBatch } from "./queue/dead-letter";
 import { processImageJob } from "./image/service";
 import { enqueueVoiceMessage, enterVoiceMode, exitVoiceMode, handleVoiceTextWhileActive, processVoiceJob } from "./voice/service";
-import { answerDocumentQuestion, enterDocumentsMode, exitDocumentsMode, processDocumentUpload } from "./documents/service";
+import { answerDocumentQuestion, enterDocumentsMode, enqueueDocumentUpload, exitDocumentsMode, processDocumentUploadJob } from "./documents/service";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const MAX_TELEGRAM_UPDATE_BYTES = 1_048_576;
@@ -63,15 +63,15 @@ export default {
 
         if (envelope.kind === "document" && envelope.document && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
-          const result = await processDocumentUpload({
+          const result = await enqueueDocumentUpload({
             db: env.DB,
             botToken: env.TELEGRAM_BOT_TOKEN,
             userId: user.id,
             fileId: envelope.document.fileId,
             mimeType: envelope.document.mimeType,
             fileName: envelope.document.fileName,
+            chatId: envelope.chat_id,
             now,
-            encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!,
           });
           await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, "error" in result ? "Не удалось обработать документ: " + result.error : "Документ принят. Задайте вопрос по содержимому.");
         }
@@ -181,7 +181,11 @@ export default {
           botToken: env.TELEGRAM_BOT_TOKEN!,
           now: () => new Date().toISOString(),
         }),
-        document: async () => ({ ok: false, retryable: false, code: "document_handler_not_registered" }),
+        document: async (message) => processDocumentUploadJob(message, {
+          db: env.DB,
+          botToken: env.TELEGRAM_BOT_TOKEN!,
+          now: () => new Date().toISOString(),
+        }),
       },
     });
   },
