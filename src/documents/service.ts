@@ -71,11 +71,12 @@ export async function processDocumentUploadJob(
   deps: { db: D1Database; botToken: string; now: () => string; fetchImpl?: typeof fetch },
 ): Promise<{ ok: true } | { ok: false; retryable: boolean; code: string }> {
   const operation = await deps.db
-    .prepare("SELECT status FROM operations WHERE id=?1 AND user_id=?2")
+    .prepare("SELECT status, temporary_result_ref FROM operations WHERE id=?1 AND user_id=?2")
     .bind(message.operationId, message.userId)
-    .first<{ status: string }>();
+    .first<{ status: string; temporary_result_ref: string | null }>();
   if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) return { ok: true };
 
+  const existingSessionId = operation?.temporary_result_ref ?? null;
   const fileId = stringValue(message.metadata?.fileId);
   const fileType = stringValue(message.metadata?.fileType) as "pdf" | "docx" | "txt" | undefined;
   const chatId = numberValue(message.metadata?.chatId);
@@ -85,6 +86,17 @@ export async function processDocumentUploadJob(
   }
 
   try {
+    if (existingSessionId) {
+      await sendTelegramMessage(
+        deps.botToken,
+        chatId,
+        "Документ готов. Задайте вопрос по содержимому.",
+        {},
+        deps.fetchImpl ?? fetch,
+      );
+      return { ok: true };
+    }
+
     const file = await getTelegramFile(deps.botToken, fileId, deps.fetchImpl ?? fetch);
     const downloaded = await downloadTelegramFile(
       deps.botToken,
@@ -116,6 +128,9 @@ export async function processDocumentUploadJob(
       deps.db.prepare(
         "UPDATE users SET active_document_session_id=?2, active_mode='documents', updated_at=?3 WHERE id=?1",
       ).bind(message.userId, sessionId, now),
+      deps.db.prepare(
+        "UPDATE operations SET temporary_result_ref=?2, telegram_delivery_status='pending' WHERE id=?1 AND user_id=?3",
+      ).bind(message.operationId, sessionId, message.userId),
     ]);
 
     await sendTelegramMessage(deps.botToken, chatId, "Документ готов. Задайте вопрос по содержимому.", {}, deps.fetchImpl ?? fetch);
