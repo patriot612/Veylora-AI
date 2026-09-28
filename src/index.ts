@@ -71,6 +71,14 @@ export default {
         const user = envelope.user ? await upsertTelegramUser(env.DB, envelope.user, now) : null;
         const claim = await claimTelegramUpdate(env.DB, envelope.update_id, user?.id ?? null, now);
         const locale = user ? await getUserLocale(env.DB, user.id) : "ru";
+        const maintenanceMode = await getSystemConfig(env.DB, "system.maintenance_mode");
+        if (user && maintenanceMode === "1" && ["text","document","voice","photo"].includes(envelope.kind)) {
+          if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "maintenance")).catch(() => false);
+          }
+          await markTelegramUpdate(env.DB, envelope.update_id, "ignored", new Date().toISOString(), "maintenance_mode");
+          return jsonResponse({ ok: true, maintenance: true });
+        }
         if (claim.duplicate) return jsonResponse({ ok: true, duplicate: true });
         if (claim.rateLimited) {
           if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
