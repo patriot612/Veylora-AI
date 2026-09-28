@@ -28,6 +28,7 @@ export async function enqueueVoiceMessage(input: {
   chatId: number;
   telegramUpdateId: number;
   now: string;
+  credentialEncryptionKey: string;
 }): Promise<{ operationId: string } | { error: string }> {
   const plan = await getActivePlan(input.db, input.userId, input.now);
   if (!plan?.voiceEnabled) return { error: "subscription_required" };
@@ -40,7 +41,7 @@ export async function enqueueVoiceMessage(input: {
     modelId,
     expectedType: "voice",
     now: input.now,
-    credentialEncryptionKey: "",
+    credentialEncryptionKey: input.credentialEncryptionKey,
   }).catch(() => null);
   if (!model) return { error: "voice_model_unavailable" };
 
@@ -141,7 +142,6 @@ export async function handleVoiceTextWhileActive(
   userId: string,
   botToken: string,
   chatId: number,
-  now: string,
   fetchImpl?: typeof fetch,
 ): Promise<void> {
   await sendTelegramMessage(
