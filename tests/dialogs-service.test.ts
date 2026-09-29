@@ -50,40 +50,27 @@ async function seedUser() {
 describe("dialogs and roles", () => {
   it("creates a new dialog from the user's selected Chat model with no role", async () => {
     const { userId, modelId } = await seedUser();
-    const dialog = await createNewConversation(env.DB, {
-      userId,
-      now: "2026-09-28T12:00:00Z",
-      expiresAt: "2026-09-29T12:00:00Z",
-    });
-
+    const dialog = await createNewConversation(env.DB, { userId, now: "2026-09-28T12:00:00Z", expiresAt: "2026-09-29T12:00:00Z" });
     expect(dialog).toMatchObject({ modelId, roleId: null, archivedAt: null });
-    const user = await env.DB.prepare("SELECT active_conversation_id, active_role_id FROM users WHERE id=?1")
-      .bind(userId).first<{active_conversation_id:string|null;active_role_id:string|null}>();
+    const user = await env.DB.prepare("SELECT active_conversation_id, active_role_id FROM users WHERE id=?1").bind(userId).first<{active_conversation_id:string|null;active_role_id:string|null}>();
     expect(user?.active_conversation_id).toBe(dialog.id);
     expect(user?.active_role_id).toBeNull();
   });
 
   it("continues a dialog using its persisted model and role", async () => {
     const { userId, modelId, roleId } = await seedUser();
-    const dialog = await createNewConversation(env.DB, {
-      userId,
-      now: "2026-09-28T12:00:00Z",
-      expiresAt: "2026-09-29T12:00:00Z",
-    });
+    const dialog = await createNewConversation(env.DB, { userId, now: "2026-09-28T12:00:00Z", expiresAt: "2026-09-29T12:00:00Z" });
     await setConversationRole(env.DB, userId, dialog.id, roleId, "2026-09-28T12:00:01Z");
     const continued = await continueConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:02Z");
     expect(continued.modelId).toBe(modelId);
     expect(continued.roleId).toBe(roleId);
   });
 
-  it("archives, restores, renames and permanently deletes only owned archived dialogs", async () => {
-    const { userId } = await seedUser();
-    const dialog = await createNewConversation(env.DB, {
-      userId,
-      now: "2026-09-28T12:00:00Z",
-      expiresAt: "2026-09-29T12:00:00Z",
-    });
+  it("archives, restores, confirms and permanently deletes only owned archived dialogs", async () => {
+    const { userId, modelId } = await seedUser();
+    const dialog = await createNewConversation(env.DB, { userId, now: "2026-09-28T12:00:00Z", expiresAt: "2026-09-29T12:00:00Z" });
 
+    await env.DB.prepare("INSERT INTO conversation_turns (id,conversation_id,user_text,assistant_text,model_id,role_id,created_at,updated_at) VALUES (?1,?2,'q','a',?3,NULL,'2026-09-28T12:00:01Z','2026-09-28T12:00:01Z')").bind(crypto.randomUUID(), dialog.id, modelId).run();
     expect(await renameConversation(env.DB, userId, dialog.id, "Переименованный", "2026-09-28T12:00:01Z")).toBe(true);
     expect(await archiveConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:02Z")).toBe(true);
     expect((await listActiveConversations(env.DB, userId)).some((item) => item.id === dialog.id)).toBe(false);
@@ -92,23 +79,22 @@ describe("dialogs and roles", () => {
     await expect(continueConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:03Z")).rejects.toThrow("conversation_archived");
     expect(await restoreConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:04Z")).toBe(true);
     expect((await listActiveConversations(env.DB, userId)).some((item) => item.id === dialog.id)).toBe(true);
-    expect(await deleteArchivedConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:05Z")).toBe(false);
+    await expect(deleteArchivedConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:05Z")).rejects.toThrow("dialog_delete_confirmation_required");
 
     await archiveConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:06Z");
-    expect(await deleteArchivedConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:07Z")).toBe(true);
+    await expect(deleteArchivedConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:07Z")).rejects.toThrow("dialog_delete_confirmation_required");
+    expect(await deleteArchivedConversation(env.DB, userId, dialog.id, "2026-09-28T12:00:08Z")).toBe(true);
     expect(await listArchivedConversations(env.DB, userId)).toEqual([]);
     expect(await listActiveConversations(env.DB, userId)).toEqual([]);
+    expect(await getConversationHistory(env.DB, userId, dialog.id)).toEqual([]);
+    expect(await env.DB.prepare("SELECT id FROM conversations WHERE id=?1").bind(dialog.id).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM conversation_turns WHERE conversation_id=?1").bind(dialog.id).first()).toBeNull();
   });
 
   it("prevents cross-user access to every dialog mutation", async () => {
     const owner = await seedUser();
     const attacker = await seedUser();
-    const dialog = await createNewConversation(env.DB, {
-      userId: owner.userId,
-      now: "2026-09-28T12:00:00Z",
-      expiresAt: "2026-09-29T12:00:00Z",
-    });
-
+    const dialog = await createNewConversation(env.DB, { userId: owner.userId, now: "2026-09-28T12:00:00Z", expiresAt: "2026-09-29T12:00:00Z" });
     expect(await renameConversation(env.DB, attacker.userId, dialog.id, "hacked", "2026-09-28T12:00:01Z")).toBe(false);
     expect(await archiveConversation(env.DB, attacker.userId, dialog.id, "2026-09-28T12:00:02Z")).toBe(false);
     expect(await restoreConversation(env.DB, attacker.userId, dialog.id, "2026-09-28T12:00:03Z")).toBe(false);
@@ -120,13 +106,10 @@ describe("dialogs and roles", () => {
     const { userId, roleId } = await seedUser();
     await env.DB.prepare("UPDATE users SET active_role_id=?2 WHERE id=?1").bind(userId, roleId).run();
     const secondModel = "dialog_second_model_" + (++seq);
-    await env.DB.prepare(
-      "INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) SELECT ?1,family_id,provider_id,credential_id,'dialog-second','Dialog Second','chat',4,0,8000,1000,'{}',1,'{}',created_at,updated_at FROM models WHERE id=?2",
-    ).bind(secondModel, (await env.DB.prepare("SELECT active_chat_model_id FROM users WHERE id=?1").bind(userId).first<{active_chat_model_id:string}>())?.active_chat_model_id).run();
-
+    const current = await env.DB.prepare("SELECT active_chat_model_id FROM users WHERE id=?1").bind(userId).first<{active_chat_model_id:string}>();
+    await env.DB.prepare("INSERT INTO models (id,family_id,provider_id,credential_id,provider_model_id,display_name,type,points_cost,subscription_only,context_window,max_output_tokens,capabilities,enabled,config,created_at,updated_at) SELECT ?1,family_id,provider_id,credential_id,'dialog-second','Dialog Second','chat',4,0,8000,1000,'{}',1,'{}',created_at,updated_at FROM models WHERE id=?2").bind(secondModel, current?.active_chat_model_id).run();
     expect(await setChatModel(env.DB, userId, secondModel, "2026-09-28T12:01:00Z")).toBe(true);
-    const user = await env.DB.prepare("SELECT active_chat_model_id, active_role_id FROM users WHERE id=?1")
-      .bind(userId).first<{active_chat_model_id:string|null;active_role_id:string|null}>();
+    const user = await env.DB.prepare("SELECT active_chat_model_id, active_role_id FROM users WHERE id=?1").bind(userId).first<{active_chat_model_id:string|null;active_role_id:string|null}>();
     expect(user?.active_chat_model_id).toBe(secondModel);
     expect(user?.active_role_id).toBeNull();
   });
@@ -142,15 +125,8 @@ describe("dialogs and roles", () => {
   it("returns full history with ownership enforced", async () => {
     const owner = await seedUser();
     const attacker = await seedUser();
-    const dialog = await createNewConversation(env.DB, {
-      userId: owner.userId,
-      now: "2026-09-28T12:00:00Z",
-      expiresAt: "2026-09-29T12:00:00Z",
-    });
-    await env.DB.prepare(
-      "INSERT INTO conversation_turns (id,conversation_id,user_text,assistant_text,model_id,role_id,created_at,updated_at) VALUES (?1,?2,'q','a',?3,NULL,'2026-09-28T12:01:00Z','2026-09-28T12:01:00Z')",
-    ).bind(crypto.randomUUID(), dialog.id, owner.modelId).run();
-
+    const dialog = await createNewConversation(env.DB, { userId: owner.userId, now: "2026-09-28T12:00:00Z", expiresAt: "2026-09-29T12:00:00Z" });
+    await env.DB.prepare("INSERT INTO conversation_turns (id,conversation_id,user_text,assistant_text,model_id,role_id,created_at,updated_at) VALUES (?1,?2,'q','a',?3,NULL,'2026-09-28T12:01:00Z','2026-09-28T12:01:00Z')").bind(crypto.randomUUID(), dialog.id, owner.modelId).run();
     expect((await getConversationHistory(env.DB, owner.userId, dialog.id)).length).toBe(1);
     expect(await getConversationHistory(env.DB, attacker.userId, dialog.id)).toEqual([]);
   });
