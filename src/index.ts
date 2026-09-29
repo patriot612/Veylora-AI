@@ -65,25 +65,24 @@ export default {
       if (Number.isFinite(contentLength) && contentLength > MAX_TELEGRAM_UPDATE_BYTES) return jsonResponse({ error: "payload_too_large" }, 413);
       let update: Record<string, unknown>;
       try { update = await request.json<Record<string, unknown>>(); } catch { return jsonResponse({ error: "invalid_json" }, 400); }
+      let envelope: ReturnType<typeof classifyTelegramUpdate> | undefined;
+      let user: Awaited<ReturnType<typeof upsertTelegramUser>> | null = null;
+      let locale = "ru";
       try {
-        const envelope = classifyTelegramUpdate(update);
+        envelope = classifyTelegramUpdate(update);
         const now = new Date().toISOString();
-        const user = envelope.user ? await upsertTelegramUser(env.DB, envelope.user, now) : null;
+        user = envelope.user ? await upsertTelegramUser(env.DB, envelope.user, now) : null;
+        locale = user ? await getUserLocale(env.DB, user.id) : "ru";
         const claim = await claimTelegramUpdate(env.DB, envelope.update_id, user?.id ?? null, now);
-        const locale = user ? await getUserLocale(env.DB, user.id) : "ru";
         const maintenanceMode = await getSystemConfig(env.DB, "system.maintenance_mode");
         if (user && maintenanceMode === "1" && ["text","document","voice","photo"].includes(envelope.kind)) {
-          if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "maintenance")).catch(() => false);
-          }
+          if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "maintenance")).catch(() => false);
           await markTelegramUpdate(env.DB, envelope.update_id, "ignored", new Date().toISOString(), "maintenance_mode");
           return jsonResponse({ ok: true, maintenance: true });
         }
         if (claim.duplicate) return jsonResponse({ ok: true, duplicate: true });
         if (claim.rateLimited) {
-          if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) {
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "rate_limited")).catch(() => false);
-          }
+          if (typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "rate_limited")).catch(() => false);
           return jsonResponse({ ok: true, rate_limited: true });
         }
         await markTelegramUpdate(env.DB, envelope.update_id, "processing", now);
@@ -106,14 +105,8 @@ export default {
             const invoice = await createPlanInvoice({ db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN!, userId: user.id, chatId: envelope.chat_id, planId, now });
             await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, "error" in invoice ? t(locale, "payments.invoiceFailed", { reason: invoice.error }) : t(locale, "payments.invoiceCreated"));
           }
-          if (typeof command === "string" && command === "/documents") {
-            await enterDocumentsMode(env.DB, user.id, now);
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, t(locale, "documents.enabled"));
-          }
-          if (typeof command === "string" && command === "/voice") {
-            const mode = await enterVoiceMode(env.DB, user.id, now);
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, mode.ok ? t(locale, "voice.enabled") : t(locale, "voice.required"));
-          }
+          if (typeof command === "string" && command === "/documents") { await enterDocumentsMode(env.DB, user.id, now); await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, t(locale, "documents.enabled")); }
+          if (typeof command === "string" && command === "/voice") { const mode = await enterVoiceMode(env.DB, user.id, now); await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id, mode.ok ? t(locale, "voice.enabled") : t(locale, "voice.required")); }
         }
         if (envelope.kind === "document" && envelope.document && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
@@ -122,13 +115,10 @@ export default {
         }
         if (envelope.kind === "text" && typeof envelope.text === "string" && typeof envelope.chat_id === "number" && typeof envelope.message_id === "number") {
           const activeMode = await env.DB.prepare("SELECT active_mode FROM users WHERE id=?1").bind(user.id).first<{ active_mode: string }>();
-          if (activeMode?.active_mode === "dialog_rename") {
-            await handleDialogRenameText(env, user.id, envelope.chat_id, envelope.text, now);
-          } else if (activeMode?.active_mode === "image") {
-            await handleImageText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
-          } else if (activeMode?.active_mode === "search") {
-            await handleSearchText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
-          } else if (activeMode?.active_mode === "documents") {
+          if (activeMode?.active_mode === "dialog_rename") await handleDialogRenameText(env, user.id, envelope.chat_id, envelope.text, now);
+          else if (activeMode?.active_mode === "image") await handleImageText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
+          else if (activeMode?.active_mode === "search") await handleSearchText(env, user.id, envelope.chat_id, envelope.update_id, envelope.text, now);
+          else if (activeMode?.active_mode === "documents") {
             if (!env.CREDENTIAL_ENCRYPTION_KEY || !env.TELEGRAM_BOT_TOKEN) throw new Error("document_runtime_secrets_missing");
             const documentModelId = await getSystemConfig(env.DB, "default_chat_model_id");
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
@@ -136,19 +126,15 @@ export default {
             if (result && "answer" in result) {
               let telegramDelivered = false;
               try {
-                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.answer);
-                telegramDelivered = true;
-                const settled = await completeDocumentQuestionDelivery(env.DB, user.id, result.operationId, new Date().toISOString());
-                if (!settled) throw new Error("document_question_delivery_settlement_failed");
+                await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.answer); telegramDelivered = true;
+                if (!(await completeDocumentQuestionDelivery(env.DB, user.id, result.operationId, new Date().toISOString()))) throw new Error("document_question_delivery_settlement_failed");
               } catch (error) {
                 if (!telegramDelivered) {
                   await releaseDocumentQuestionDelivery(env.DB, result.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_document_question_delivery_failed").catch(() => false);
                   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
                 }
               }
-            } else {
-              await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "documents.answerFailed", { reason: (result as {error:string}).error }));
-            }
+            } else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "documents.answerFailed", { reason: (result as {error:string}).error }));
           } else if (activeMode?.active_mode === "voice") {
             if (!env.TELEGRAM_BOT_TOKEN) throw new Error("telegram_bot_token_missing");
             await handleVoiceTextWhileActive(env.TELEGRAM_BOT_TOKEN, envelope.chat_id);
@@ -158,17 +144,11 @@ export default {
             try {
               const prefs = JSON.parse(prefsRow?.ui_preferences ?? "{}") as Record<string, unknown>;
               const menuMessageId = typeof prefs.mainMenuMessageId === "number" ? prefs.mainMenuMessageId : null;
-              if (menuMessageId) {
-                await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, menuMessageId).catch(() => false);
-                delete prefs.mainMenuMessageId;
-                await env.DB.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(user.id, JSON.stringify(prefs)).run();
-              }
-            } catch {
-              // Ignore malformed/stale UI preferences.
-            }
+              if (menuMessageId) { await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, menuMessageId).catch(() => false); delete prefs.mainMenuMessageId; await env.DB.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(user.id, JSON.stringify(prefs)).run(); }
+            } catch { /* Ignore malformed/stale UI preferences. */ }
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
-            const send = (text: string, options?: Parameters<typeof sendTelegramMessage>[3]) => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, text, options);
-            const edit = (messageId: number, text: string, options?: Parameters<typeof editTelegramMessage>[4]) => editTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope.chat_id!, messageId, text, options);
+            const send = (text: string, options?: Parameters<typeof sendTelegramMessage>[3]) => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope!.chat_id!, text, options);
+            const edit = (messageId: number, text: string, options?: Parameters<typeof editTelegramMessage>[4]) => editTelegramMessage(env.TELEGRAM_BOT_TOKEN!, envelope!.chat_id!, messageId, text, options);
             await handleChatMessage({ db: env.DB, gateway, userId: user.id, text: envelope.text, telegramUpdateId: envelope.update_id, chatId: envelope.chat_id, messageId: envelope.message_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY, send, edit });
           }
         }
@@ -179,12 +159,9 @@ export default {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY) throw new Error("voice_runtime_secrets_missing");
           if (!fileId) throw new Error("voice_file_id_missing");
           const result = await enqueueVoiceMessage({ db: env.DB, queue: env.AI_JOBS, userId: user.id, fileId, mimeType: voice && typeof voice.mime_type === "string" ? voice.mime_type : undefined, duration: voice && typeof voice.duration === "number" ? voice.duration : undefined, chatId: envelope.chat_id, telegramUpdateId: envelope.update_id, now, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
-          if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? t(locale, "voice.required") : t(locale, "voice.acceptFailed"));
-          else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "voice.processing"));
+          if ("error" in result) await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, result.error === "subscription_required" ? t(locale, "voice.required") : t(locale, "voice.acceptFailed")); else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "voice.processing"));
         }
-        if (envelope.kind === "callback" && typeof envelope.chat_id === "number") {
-          await handleTelegramCallback(env, request.url, user.id, user.telegramUserId, envelope.chat_id, envelope.callbackQueryId, envelope.callbackData ?? "", now, envelope.message_id);
-        }
+        if (envelope.kind === "callback" && typeof envelope.chat_id === "number") await handleTelegramCallback(env, request.url, user.id, user.telegramUserId, envelope.chat_id, envelope.callbackQueryId, envelope.callbackData ?? "", now, envelope.message_id);
         const commandText = extractMessageText(update);
         if (envelope.kind === "command" && commandText?.startsWith("/search") && typeof envelope.chat_id === "number") {
           if (!env.TELEGRAM_BOT_TOKEN || !env.CREDENTIAL_ENCRYPTION_KEY || !env.SEARXNG_URL) throw new Error("search_runtime_secrets_missing");
@@ -193,40 +170,22 @@ export default {
           else {
             const gateway = createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY, createDefaultProviderAdapters());
             const status = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.processing")).catch(() => null);
-            const outcome = await executeSearch({
-              db: env.DB,
-              gateway,
-              userId: user.id,
-              query,
-              telegramUpdateId: envelope.update_id,
-              now,
-              searxngUrl: env.SEARXNG_URL,
-              searchAuthToken: env.SEARXNG_AUTH_TOKEN,
-              credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY,
-            });
+            const outcome = await executeSearch({ db: env.DB, gateway, userId: user.id, query, telegramUpdateId: envelope.update_id, now, searxngUrl: env.SEARXNG_URL, searchAuthToken: env.SEARXNG_AUTH_TOKEN, credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY });
             if (outcome.kind === "answered") {
               let telegramDelivered = false;
               try {
-                if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, outcome.text);
-                else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, outcome.text);
+                if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, outcome.text); else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, outcome.text);
                 telegramDelivered = true;
-                const settled = await completeSearchDelivery(env.DB, user.id, outcome.operationId, new Date().toISOString());
-                if (!settled) throw new Error("search_delivery_settlement_failed");
+                if (!(await completeSearchDelivery(env.DB, user.id, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");
               } catch (error) {
                 if (!telegramDelivered) {
                   await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-                  if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, t(locale, "search.deliveryFailed")).catch(() => false);
-                  else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
+                  if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, t(locale, "search.deliveryFailed")).catch(() => false); else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
                 }
               }
             } else {
-              const message = outcome.kind === "no_result"
-                ? t(locale, "search.noResult")
-                : outcome.kind === "insufficient_points"
-                  ? t(locale, "billing.insufficient")
-                  : t(locale, "search.failed");
-              if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, message).catch(() => false);
-              else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message);
+              const message = outcome.kind === "no_result" ? t(locale, "search.noResult") : outcome.kind === "insufficient_points" ? t(locale, "billing.insufficient") : t(locale, "search.failed");
+              if (status?.message_id) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, status.message_id, message).catch(() => false); else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, message);
             }
           }
         }
@@ -234,11 +193,9 @@ export default {
         return jsonResponse({ ok: true });
       } catch (error) {
         const updateId = typeof update.update_id === "number" ? update.update_id : null;
-        if (error instanceof Error && error.message === "dialog_delete_confirmation_required" && user && typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN && typeof envelope.callbackData === "string" && envelope.callbackData.startsWith("dialog:delete:")) {
+        if (error instanceof Error && error.message === "dialog_delete_confirmation_required" && user && envelope && typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN && typeof envelope.callbackData === "string" && envelope.callbackData.startsWith("dialog:delete:")) {
           const confirmation = deleteConfirmation(locale);
-          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, confirmation.text, {
-            reply_markup: { inline_keyboard: [[{ text: confirmation.confirm, callback_data: envelope.callbackData }], [{ text: confirmation.cancel, callback_data: "menu:dialogs" }]] },
-          }).catch(() => false);
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, confirmation.text, { reply_markup: { inline_keyboard: [[{ text: confirmation.confirm, callback_data: envelope.callbackData }], [{ text: confirmation.cancel, callback_data: "menu:dialogs" }]] } }).catch(() => false);
           if (updateId !== null) await markTelegramUpdate(env.DB, updateId, "processed", new Date().toISOString(), "dialog_delete_confirmation");
           return jsonResponse({ ok: true, confirmation_required: true });
         }
