@@ -171,10 +171,35 @@ export async function deleteArchivedConversation(
   conversationId: string,
   now: string,
 ): Promise<boolean> {
-  const result = await db.prepare(
-    "UPDATE conversations SET deleted_at=?3,updated_at=?3 WHERE id=?1 AND user_id=?2 AND deleted_at IS NULL AND archived_at IS NOT NULL",
-  ).bind(conversationId, userId, now).run();
-  return (result.meta.changes ?? 0) === 1;
+  const settings = await db.prepare("SELECT ui_preferences FROM user_settings WHERE user_id=?1").bind(userId).first<{ ui_preferences: string }>();
+  let prefs: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(settings?.ui_preferences ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prefs = parsed as Record<string, unknown>;
+  } catch {
+    prefs = {};
+  }
+
+  const pendingId = typeof prefs.pendingDeleteConversationId === "string" ? prefs.pendingDeleteConversationId : "";
+  const pendingAt = typeof prefs.pendingDeleteConversationAt === "string" ? Date.parse(prefs.pendingDeleteConversationAt) : NaN;
+  const confirmed = pendingId === conversationId && Number.isFinite(pendingAt) && Date.now() - pendingAt <= 5 * 60 * 1000;
+
+  if (!confirmed) {
+    prefs.pendingDeleteConversationId = conversationId;
+    prefs.pendingDeleteConversationAt = now;
+    await db.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(userId, JSON.stringify(prefs)).run();
+    throw new Error("dialog_delete_confirmation_required");
+  }
+
+  delete prefs.pendingDeleteConversationId;
+  delete prefs.pendingDeleteConversationAt;
+  const result = await db.batch([
+    db.prepare("DELETE FROM conversation_turns WHERE conversation_id=?1 AND EXISTS (SELECT 1 FROM conversations WHERE id=?1 AND user_id=?2 AND archived_at IS NOT NULL)").bind(conversationId, userId),
+    db.prepare("DELETE FROM conversations WHERE id=?1 AND user_id=?2 AND deleted_at IS NULL AND archived_at IS NOT NULL").bind(conversationId, userId),
+    db.prepare("UPDATE users SET active_conversation_id=NULL, active_role_id=NULL, updated_at=?2 WHERE id=?1 AND active_conversation_id=?3").bind(userId, now, conversationId),
+    db.prepare("UPDATE user_settings SET ui_preferences=?2 WHERE user_id=?1").bind(userId, JSON.stringify(prefs)),
+  ]);
+  return (result[1].meta.changes ?? 0) === 1;
 }
 
 export async function setChatModel(
