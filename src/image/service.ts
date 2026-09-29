@@ -29,7 +29,6 @@ export type ImageQueueDeps = {
   encryptionKey: string;
   now: () => string;
   fetchImpl?: typeof fetch;
-  results?: R2Bucket;
 };
 
 export async function handleImageRequest(input: ImageRequest): Promise<{ operationId: string } | { error: string }> {
@@ -119,21 +118,14 @@ export async function processImageJob(message: {
   if (chatId === null) return { ok: false, retryable: false, code: "image_chat_missing" };
 
   const existingRef = operation.temporary_result_ref;
-  if (operation.telegram_delivery_status === "sent" && existingRef) return { ok: true };
+  if (operation.telegram_delivery_status === "sent") return { ok: true };
 
-  let result: GatewayImageResult;
+  let result: GatewayImageResult & { fileId?: string };
   try {
-    if (existingRef?.startsWith("r2:")) {
-      if (!deps.results) return { ok: false, retryable: false, code: "image_result_storage_unavailable" };
-      const object = await deps.results.get(existingRef.slice(3));
-      if (!object) return { ok: false, retryable: false, code: "image_result_missing" };
-      result = {
-        modelId: operation.model_id,
-        bytes: new Uint8Array(await object.arrayBuffer()),
-        contentType: object.httpMetadata?.contentType ?? "image/png",
-      };
-    } else if (existingRef) {
-      result = { modelId: operation.model_id, url: existingRef };
+    if (existingRef) {
+      result = isHttpUrl(existingRef)
+        ? { modelId: operation.model_id, url: existingRef }
+        : { modelId: operation.model_id, fileId: existingRef };
     } else {
       const generation = await deps.gateway.generateImage({
         userId: message.userId,
@@ -150,15 +142,6 @@ export async function processImageJob(message: {
         await deps.db
           .prepare("UPDATE operations SET temporary_result_ref = ?1, telegram_delivery_status='pending' WHERE id=?2 AND user_id=?3")
           .bind(generation.url, message.operationId, message.userId)
-          .run();
-      } else if (generation.bytes && deps.results) {
-        const key = `image/${message.operationId}`;
-        await deps.results.put(key, generation.bytes, {
-          httpMetadata: { contentType: generation.contentType ?? "image/png" },
-        });
-        await deps.db
-          .prepare("UPDATE operations SET temporary_result_ref = ?1, telegram_delivery_status='pending' WHERE id=?2 AND user_id=?3")
-          .bind(`r2:${key}`, message.operationId, message.userId)
           .run();
       }
     }
@@ -180,16 +163,17 @@ export async function processImageJob(message: {
   });
 
   try {
-    await sendTelegramPhoto(
+    const delivered = await sendTelegramPhoto(
       deps.botToken,
       chatId,
-      { url: result.url, bytes: result.bytes, contentType: result.contentType },
+      { fileId: result.fileId, url: result.url, bytes: result.bytes, contentType: result.contentType },
       {},
       deps.fetchImpl ?? fetch,
     );
+    const telegramFileId = delivered.photo?.at(-1)?.file_id ?? result.fileId ?? null;
     await deps.db
-      .prepare("UPDATE operations SET telegram_delivery_status='sent' WHERE id=?1 AND user_id=?2")
-      .bind(message.operationId, message.userId)
+      .prepare("UPDATE operations SET temporary_result_ref=?1, telegram_delivery_status='sent' WHERE id=?2 AND user_id=?3")
+      .bind(telegramFileId, message.operationId, message.userId)
       .run();
     return { ok: true };
   } catch (error) {
@@ -211,4 +195,8 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\\/\\//i.test(value);
 }
