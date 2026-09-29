@@ -206,9 +206,9 @@ export default {
     return jsonResponse({ error: "not_found" }, 404);
   },
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    if (batch.queue === "veylora-ai-jobs-dlq") { await processDeadLetterBatch(batch, env.DB, () => new Date().toISOString(), env.RESULTS); return; }
-    await processQueueBatch(batch, { db: env.DB, now: () => new Date().toISOString(), results: env.RESULTS, handlers: {
-      image: async (message) => processImageJob(message, { db: env.DB, gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()), botToken: env.TELEGRAM_BOT_TOKEN!, encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!, now: () => new Date().toISOString(), results: env.RESULTS }),
+    if (batch.queue === "veylora-ai-jobs-dlq") { await processDeadLetterBatch(batch, env.DB, () => new Date().toISOString()); return; }
+    await processQueueBatch(batch, { db: env.DB, now: () => new Date().toISOString(), handlers: {
+      image: async (message) => processImageJob(message, { db: env.DB, gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()), botToken: env.TELEGRAM_BOT_TOKEN!, encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!, now: () => new Date().toISOString() }),
       voice: async (message) => processVoiceJob(message, { db: env.DB, gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()), botToken: env.TELEGRAM_BOT_TOKEN!, now: () => new Date().toISOString() }),
       document: async (message) => processDocumentUploadJob(message, { db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN!, now: () => new Date().toISOString() }),
     } });
