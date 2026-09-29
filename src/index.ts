@@ -142,17 +142,8 @@ export default {
                 if (!settled) throw new Error("document_question_delivery_settlement_failed");
               } catch (error) {
                 if (!telegramDelivered) {
-                  await releaseDocumentQuestionDelivery(
-                    env.DB,
-                    result.operationId,
-                    new Date().toISOString(),
-                    error instanceof Error ? error.message : "telegram_document_question_delivery_failed",
-                  ).catch(() => false);
-                  await sendTelegramMessage(
-                    env.TELEGRAM_BOT_TOKEN,
-                    envelope.chat_id,
-                    t(locale, "search.deliveryFailed"),
-                  ).catch(() => false);
+                  await releaseDocumentQuestionDelivery(env.DB, result.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_document_question_delivery_failed").catch(() => false);
+                  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, t(locale, "search.deliveryFailed")).catch(() => false);
                 }
               }
             } else {
@@ -243,6 +234,14 @@ export default {
         return jsonResponse({ ok: true });
       } catch (error) {
         const updateId = typeof update.update_id === "number" ? update.update_id : null;
+        if (error instanceof Error && error.message === "dialog_delete_confirmation_required" && user && typeof envelope.chat_id === "number" && env.TELEGRAM_BOT_TOKEN && typeof envelope.callbackData === "string" && envelope.callbackData.startsWith("dialog:delete:")) {
+          const confirmation = deleteConfirmation(locale);
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, envelope.chat_id, confirmation.text, {
+            reply_markup: { inline_keyboard: [[{ text: confirmation.confirm, callback_data: envelope.callbackData }], [{ text: confirmation.cancel, callback_data: "menu:dialogs" }]] },
+          }).catch(() => false);
+          if (updateId !== null) await markTelegramUpdate(env.DB, updateId, "processed", new Date().toISOString(), "dialog_delete_confirmation");
+          return jsonResponse({ ok: true, confirmation_required: true });
+        }
         if (updateId !== null) await markTelegramUpdate(env.DB, updateId, "failed", new Date().toISOString(), error instanceof Error ? error.message : "unknown_error");
         return jsonResponse({ error: "internal_error" }, 500);
       }
@@ -250,15 +249,25 @@ export default {
     return jsonResponse({ error: "not_found" }, 404);
   },
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    if (batch.queue === "veylora-ai-jobs-dlq") { await processDeadLetterBatch(batch, env.DB, () => new Date().toISOString()); return; }
-    await processQueueBatch(batch, { db: env.DB, now: () => new Date().toISOString(), handlers: {
-      image: async (message) => processImageJob(message, { db: env.DB, gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()), botToken: env.TELEGRAM_BOT_TOKEN!, encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!, now: () => new Date().toISOString() }),
+    if (batch.queue === "veylora-ai-jobs-dlq") { await processDeadLetterBatch(batch, env.DB, () => new Date().toISOString(), env.RESULTS); return; }
+    await processQueueBatch(batch, { db: env.DB, now: () => new Date().toISOString(), results: env.RESULTS, handlers: {
+      image: async (message) => processImageJob(message, { db: env.DB, gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()), botToken: env.TELEGRAM_BOT_TOKEN!, encryptionKey: env.CREDENTIAL_ENCRYPTION_KEY!, now: () => new Date().toISOString(), results: env.RESULTS }),
       voice: async (message) => processVoiceJob(message, { db: env.DB, gateway: createAIGateway(env.DB, env.CREDENTIAL_ENCRYPTION_KEY!, createDefaultProviderAdapters()), botToken: env.TELEGRAM_BOT_TOKEN!, now: () => new Date().toISOString() }),
       document: async (message) => processDocumentUploadJob(message, { db: env.DB, botToken: env.TELEGRAM_BOT_TOKEN!, now: () => new Date().toISOString() }),
     } });
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await runScheduledCleanup(env.DB, new Date().toISOString()); },
 } satisfies ExportedHandler<Env>;
+
+function deleteConfirmation(locale: string): { text: string; confirm: string; cancel: string } {
+  switch (locale) {
+    case "en": return { text: "Delete this dialog permanently? This action cannot be undone.", confirm: "Delete permanently", cancel: "Cancel" };
+    case "uz": return { text: "Bu muloqot butunlay o‘chirilsinmi? Bu amalni bekor qilib bo‘lmaydi.", confirm: "Butunlay o‘chirish", cancel: "Bekor qilish" };
+    case "fr": return { text: "Supprimer définitivement ce dialogue ? Cette action est irréversible.", confirm: "Supprimer définitivement", cancel: "Annuler" };
+    case "de": return { text: "Diesen Dialog dauerhaft löschen? Diese Aktion kann nicht rückgängig gemacht werden.", confirm: "Dauerhaft löschen", cancel: "Abbrechen" };
+    default: return { text: "Удалить диалог навсегда? Это действие нельзя отменить.", confirm: "Удалить навсегда", cancel: "Отмена" };
+  }
+}
 
 function extractMessageText(update: Record<string, unknown>): string | undefined { const message = update.message; if (typeof message !== "object" || message === null || Array.isArray(message)) return undefined; const text = (message as Record<string, unknown>).text; return typeof text === "string" ? text : undefined; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
