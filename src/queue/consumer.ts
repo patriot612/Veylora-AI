@@ -11,6 +11,7 @@ export type QueueConsumerDeps = {
   db: D1Database;
   now: () => string;
   handlers: Record<QueueJobMessage["jobType"], HeavyJobHandler>;
+  results?: R2Bucket;
 };
 
 const PROCESSING_LEASE_MS = 10 * 60 * 1000;
@@ -36,9 +37,9 @@ export async function processQueueMessage(
   }
 
   const operation = await deps.db
-    .prepare("SELECT status, user_id, telegram_delivery_status FROM operations WHERE id=?1 AND user_id=?2")
+    .prepare("SELECT status, user_id, telegram_delivery_status, temporary_result_ref FROM operations WHERE id=?1 AND user_id=?2")
     .bind(message.body.operationId, message.body.userId)
-    .first<{ status: string; user_id: string; telegram_delivery_status: string | null }>();
+    .first<{ status: string; user_id: string; telegram_delivery_status: string | null; temporary_result_ref: string | null }>();
 
   if (!operation || ["succeeded", "failed", "timeout", "cancelled"].includes(operation.status)) {
     await deps.db
@@ -49,9 +50,6 @@ export async function processQueueMessage(
     return "acked";
   }
 
-  // A provider/media handler may have completed Telegram delivery and then lost
-  // the process before the reservation settlement. Never invoke the external
-  // handler again in that state: settle the existing operation idempotently.
   if (operation.telegram_delivery_status === "sent") {
     const settled = await settleReservation(deps.db, message.body.operationId, deps.now());
     if (!settled) {
@@ -59,6 +57,7 @@ export async function processQueueMessage(
       message.retry();
       return "retried";
     }
+    await cleanupTemporaryResult(deps.results, operation.temporary_result_ref);
     await deps.db
       .prepare("UPDATE queue_jobs SET status='succeeded', updated_at=?2 WHERE operation_id=?1")
       .bind(message.body.operationId, deps.now())
@@ -85,7 +84,9 @@ export async function processQueueMessage(
         retryMessage(message, result.retryAfterSeconds);
         return "retried";
       }
+      const ref = await getTemporaryResultRef(deps.db, message.body.operationId, message.body.userId);
       await releaseReservation(deps.db, message.body.operationId, deps.now(), "failed", result.code);
+      await cleanupTemporaryResult(deps.results, ref);
       await deps.db
         .prepare("UPDATE queue_jobs SET status='failed', updated_at=?2 WHERE operation_id=?1")
         .bind(message.body.operationId, deps.now())
@@ -94,12 +95,14 @@ export async function processQueueMessage(
       return "acked";
     }
 
+    const ref = await getTemporaryResultRef(deps.db, message.body.operationId, message.body.userId);
     const settled = await settleReservation(deps.db, message.body.operationId, deps.now());
     if (!settled) {
       await touchQueueJob(deps.db, message.body.operationId, deps.now());
       message.retry();
       return "retried";
     }
+    await cleanupTemporaryResult(deps.results, ref);
 
     await deps.db
       .prepare("UPDATE queue_jobs SET status='succeeded', updated_at=?2 WHERE operation_id=?1")
@@ -130,58 +133,47 @@ async function claimQueueJob(
   if (job.status === "processing") {
     const nowMs = Date.parse(now);
     const updatedMs = Date.parse(job.updated_at);
-    const leaseFresh =
-      Number.isFinite(nowMs) &&
-      Number.isFinite(updatedMs) &&
-      nowMs - updatedMs < PROCESSING_LEASE_MS;
+    const leaseFresh = Number.isFinite(nowMs) && Number.isFinite(updatedMs) && nowMs - updatedMs < PROCESSING_LEASE_MS;
     if (leaseFresh) return "busy";
 
     const reclaimed = await db
-      .prepare(
-        "UPDATE queue_jobs SET status='processing', attempt=attempt+1, updated_at=?2 WHERE operation_id=?1 AND status='processing' AND updated_at=?3",
-      )
+      .prepare("UPDATE queue_jobs SET status='processing', attempt=attempt+1, updated_at=?2 WHERE operation_id=?1 AND status='processing' AND updated_at=?3")
       .bind(operationId, now, job.updated_at)
       .run();
     return (reclaimed.meta.changes ?? 0) === 1 ? "claimed" : claimQueueJob(db, operationId, now);
   }
 
   const claimed = await db
-    .prepare(
-      "UPDATE queue_jobs SET status='processing', attempt=attempt+1, updated_at=?2 WHERE operation_id=?1 AND status='pending'",
-    )
+    .prepare("UPDATE queue_jobs SET status='processing', attempt=attempt+1, updated_at=?2 WHERE operation_id=?1 AND status='pending'")
     .bind(operationId, now)
     .run();
   if ((claimed.meta.changes ?? 0) === 1) return "claimed";
 
-  const latest = await db
-    .prepare("SELECT status FROM queue_jobs WHERE operation_id = ?1")
-    .bind(operationId)
-    .first<{ status: string }>();
+  const latest = await db.prepare("SELECT status FROM queue_jobs WHERE operation_id = ?1").bind(operationId).first<{ status: string }>();
   if (!latest || ["succeeded", "failed", "dead_lettered"].includes(latest.status)) return "terminal";
   return "busy";
 }
 
 async function touchQueueJob(db: D1Database, operationId: string, now: string): Promise<void> {
-  await db
-    .prepare("UPDATE queue_jobs SET updated_at=?2 WHERE operation_id=?1 AND status='processing'")
-    .bind(operationId, now)
-    .run();
+  await db.prepare("UPDATE queue_jobs SET updated_at=?2 WHERE operation_id=?1 AND status='processing'").bind(operationId, now).run();
+}
+
+async function getTemporaryResultRef(db: D1Database, operationId: string, userId: string): Promise<string | null> {
+  const row = await db.prepare("SELECT temporary_result_ref FROM operations WHERE id=?1 AND user_id=?2").bind(operationId, userId).first<{ temporary_result_ref: string | null }>();
+  return row?.temporary_result_ref ?? null;
+}
+
+async function cleanupTemporaryResult(results: R2Bucket | undefined, ref: string | null): Promise<void> {
+  if (!results || !ref?.startsWith("r2:")) return;
+  await results.delete(ref.slice(3)).catch(() => false);
 }
 
 function retryMessage(message: Message<unknown>, retryAfterSeconds?: number): void {
   const delay = retryAfterSeconds;
-  if (typeof delay === "number" && Number.isSafeInteger(delay) && delay > 0) {
-    message.retry({ delaySeconds: Math.min(86400, delay) });
-  } else {
-    message.retry();
-  }
+  if (typeof delay === "number" && Number.isSafeInteger(delay) && delay > 0) message.retry({ delaySeconds: Math.min(86400, delay) });
+  else message.retry();
 }
 
-export async function processQueueBatch(
-  batch: MessageBatch<unknown>,
-  deps: QueueConsumerDeps,
-): Promise<void> {
-  for (const message of batch.messages) {
-    await processQueueMessage(message, deps);
-  }
+export async function processQueueBatch(batch: MessageBatch<unknown>, deps: QueueConsumerDeps): Promise<void> {
+  for (const message of batch.messages) await processQueueMessage(message, deps);
 }
