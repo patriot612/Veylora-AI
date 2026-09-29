@@ -11,7 +11,6 @@ export type QueueConsumerDeps = {
   db: D1Database;
   now: () => string;
   handlers: Record<QueueJobMessage["jobType"], HeavyJobHandler>;
-  results?: R2Bucket;
 };
 
 const PROCESSING_LEASE_MS = 10 * 60 * 1000;
@@ -57,7 +56,6 @@ export async function processQueueMessage(
       message.retry();
       return "retried";
     }
-    await cleanupTemporaryResult(deps.results, operation.temporary_result_ref);
     await deps.db
       .prepare("UPDATE queue_jobs SET status='succeeded', updated_at=?2 WHERE operation_id=?1")
       .bind(message.body.operationId, deps.now())
@@ -84,9 +82,7 @@ export async function processQueueMessage(
         retryMessage(message, result.retryAfterSeconds);
         return "retried";
       }
-      const ref = await getTemporaryResultRef(deps.db, message.body.operationId, message.body.userId);
-      await releaseReservation(deps.db, message.body.operationId, deps.now(), "failed", result.code);
-      await cleanupTemporaryResult(deps.results, ref);
+        await releaseReservation(deps.db, message.body.operationId, deps.now(), "failed", result.code);
       await deps.db
         .prepare("UPDATE queue_jobs SET status='failed', updated_at=?2 WHERE operation_id=?1")
         .bind(message.body.operationId, deps.now())
@@ -102,7 +98,6 @@ export async function processQueueMessage(
       message.retry();
       return "retried";
     }
-    await cleanupTemporaryResult(deps.results, ref);
 
     await deps.db
       .prepare("UPDATE queue_jobs SET status='succeeded', updated_at=?2 WHERE operation_id=?1")
@@ -161,11 +156,6 @@ async function touchQueueJob(db: D1Database, operationId: string, now: string): 
 async function getTemporaryResultRef(db: D1Database, operationId: string, userId: string): Promise<string | null> {
   const row = await db.prepare("SELECT temporary_result_ref FROM operations WHERE id=?1 AND user_id=?2").bind(operationId, userId).first<{ temporary_result_ref: string | null }>();
   return row?.temporary_result_ref ?? null;
-}
-
-async function cleanupTemporaryResult(results: R2Bucket | undefined, ref: string | null): Promise<void> {
-  if (!results || !ref?.startsWith("r2:")) return;
-  await results.delete(ref.slice(3)).catch(() => false);
 }
 
 function retryMessage(message: Message<unknown>, retryAfterSeconds?: number): void {
