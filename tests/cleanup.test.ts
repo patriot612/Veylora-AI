@@ -15,11 +15,11 @@ describe("scheduled cleanup", () => {
       env.DB.prepare("INSERT INTO users (id,telegram_user_id,daily_billing_day,active_document_session_id,created_at,updated_at) VALUES (?1,?2,'2026-09-28',?3,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(activeUser, 980000002, activeSession),
       env.DB.prepare("INSERT INTO plans (id,code,name,duration_days,daily_points,retention_hours,price_stars,created_at,updated_at) VALUES (?1,'cleanup-test','Cleanup',1,10,24,1,'2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(planId),
       env.DB.prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,ends_at,created_at,updated_at) VALUES (?1,?2,?3,'active','2026-09-27T00:00:00Z','2026-09-27T23:59:00Z','2026-09-27T00:00:00Z','2026-09-27T00:00:00Z')").bind(crypto.randomUUID(), expiredUser, planId),
-      env.DB.prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,ends_at,created_at,updated_at) VALUES (?1,?2,?3,'active','2026-09-28T00:00:00Z','2026-09-29T00:00:00Z','2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(crypto.randomUUID(), activeUser, planId),
+      env.DB.prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,ends_at,created_at,updated_at) VALUES (?1,?2,?3,'active','2026-09-28T00:00:00Z','2026-09-30T00:00:00Z','2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(crypto.randomUUID(), activeUser, planId),
       env.DB.prepare("INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,'txt',5,'2026-09-27T23:00:00Z','2026-09-27T00:00:00Z','2026-09-27T00:00:00Z')").bind(expiredSession, expiredUser),
-      env.DB.prepare("INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,'txt',5,'2026-09-29T00:00:00Z','2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(activeSession, activeUser),
+      env.DB.prepare("INSERT INTO document_sessions (id,user_id,file_type,extracted_chars,expires_at,created_at,last_activity_at) VALUES (?1,?2,'txt',5,'2026-09-30T00:00:00Z','2026-09-28T00:00:00Z','2026-09-28T00:00:00Z')").bind(activeSession, activeUser),
       env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'expired','2026-09-27T23:00:00Z')").bind(crypto.randomUUID(), expiredSession),
-      env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'active','2026-09-29T00:00:00Z')").bind(crypto.randomUUID(), activeSession),
+      env.DB.prepare("INSERT INTO document_chunks (id,session_id,chunk_index,content,expires_at) VALUES (?1,?2,0,'active','2026-09-30T00:00:00Z')").bind(crypto.randomUUID(), activeSession),
     ]);
 
     await worker.scheduled({ cron: "0 * * * *", scheduledTime: Date.parse("2026-09-28T00:00:00Z"), type: "scheduled", noRetry: () => undefined } as ScheduledController, env);
@@ -79,5 +79,4 @@ describe("scheduled cleanup", () => {
     expect(turns?.count).toBe(0);
     expect(user?.active_conversation_id).toBeNull();
   });
-
 });
