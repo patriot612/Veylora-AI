@@ -73,7 +73,7 @@ export async function sendTelegramMessage(
   text: string,
   extra: Record<string, unknown> = {},
   fetchImpl: typeof fetch = fetch,
-): Promise<TelegramPhotoMessage> {
+): Promise<{ message_id: number }> {
   return telegramApi<{ message_id: number }>(
     botToken,
     "sendMessage",
@@ -119,7 +119,7 @@ export async function sendTelegramPhoto(
   source: { fileId?: string; url?: string; bytes?: Uint8Array; contentType?: string },
   extra: Record<string, unknown> = {},
   fetchImpl: typeof fetch = fetch,
-): Promise<{ message_id: number }> {
+): Promise<TelegramPhotoMessage> {
   if (source.fileId) {
     return telegramApi<TelegramPhotoMessage>(
       botToken,
