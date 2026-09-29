@@ -21,7 +21,9 @@ Create these as Worker secrets; never commit their values:
 - `SEARXNG_URL`
 - `SEARXNG_AUTH_TOKEN`
 - `ADMIN_OWNER_TELEGRAM_ID`
-- `ADMIN_WEBAPP_URL`
+
+Optional:
+- `ADMIN_WEBAPP_URL` — explicit Admin Mini App URL. When omitted, the bot uses the same Worker URL with `/admin`.
 
 ## Provider credentials
 
