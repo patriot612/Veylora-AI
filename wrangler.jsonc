@@ -15,8 +15,7 @@
       "CREDENTIAL_ENCRYPTION_KEY",
       "SEARXNG_URL",
       "SEARXNG_AUTH_TOKEN",
-      "ADMIN_OWNER_TELEGRAM_ID",
-      "ADMIN_WEBAPP_URL"
+      "ADMIN_OWNER_TELEGRAM_ID"
     ]
   },
   "d1_databases": [
