@@ -304,6 +304,14 @@ async function safeSend(
   text: string,
   options?: Record<string, unknown>,
 ) {
+  if (!options) {
+    const planLabels: Array<[string, string]> = [["[Тарифы]", "Тарифы"], ["[Plans]", "Plans"], ["[Tariflar]", "Tariflar"], ["[Tarifs]", "Tarifs"], ["[Tarife]", "Tarife"]];
+    const plan = planLabels.find(([marker]) => text.includes(marker));
+    if (plan) {
+      const cleaned = text.replace(plan[0], "").replace(/\n{3,}/g, "\n\n").trim();
+      return safeSend(send, cleaned, { reply_markup: { inline_keyboard: [[{ text: plan[1], callback_data: "account:plans" }]] } });
+    }
+  }
   try {
     return await send(text, options);
   } catch {
