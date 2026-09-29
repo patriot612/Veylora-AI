@@ -265,9 +265,15 @@ export async function handleTelegramCallback(
     const model = await env.DB.prepare("SELECT subscription_only FROM models WHERE id=?1 AND type='chat' AND enabled=1").bind(modelId).first<{ subscription_only:number }>();
     if (!model) throw new Error("model_unavailable");
     if (model.subscription_only === 1 && !(await getActivePlan(env.DB, userId, now))) {
-      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"), {
-        reply_markup: { inline_keyboard: [[{ text: t(locale, "account.plans"), callback_data: "account:plans" }],[{ text: t(locale, "common.back"), callback_data: "menu:image" }]] },
-      });
+      const alternatives = (await listSelectableModels(env.DB, { userId, type: "chat", now }))
+        .filter((item) => item.id !== modelId && !item.subscriptionOnly)
+        .slice(0, 2);
+      const keyboard = [
+        [{ text: t(locale, "account.plans"), callback_data: "account:plans" }],
+        ...alternatives.map((item) => [{ text: "✓ " + item.displayName + " · " + item.pointsCost + " " + t(locale, "units.points"), callback_data: "model:" + item.id }]),
+        [{ text: t(locale, "models.backToFamilies"), callback_data: "menu:model" }],
+      ];
+      await sendTelegramMessage(botToken, chatId, t(locale, "subscription.required"), { reply_markup: { inline_keyboard: keyboard } });
       return true;
     }
     const ok = await setChatModel(env.DB, userId, modelId, now);
@@ -699,22 +705,16 @@ async function deliverSearchOutcome(env: Env, userId: string, chatId: number, ou
   if (outcome.kind === "answered") {
     let telegramDelivered = false;
     try {
-      if (statusMessageId) {
-        await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, outcome.text);
-      } else {
-        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
-      }
+      if (statusMessageId) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, outcome.text);
+      else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, outcome.text);
       telegramDelivered = true;
       if (!(await completeSearchDelivery(env.DB, userId, outcome.operationId, new Date().toISOString()))) throw new Error("search_delivery_settlement_failed");
       const prefs = await getUiPreferences(env.DB, userId); delete prefs.lastSearchQuery; await setUiPreferences(env.DB, userId, prefs);
     } catch (error) {
       if (!telegramDelivered) {
         await releaseSearchDelivery(env.DB, outcome.operationId, new Date().toISOString(), error instanceof Error ? error.message : "telegram_delivery_failed").catch(() => false);
-        if (statusMessageId) {
-          await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, t(locale, "search.deliveryFailed")).catch(() => false);
-        } else {
-          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(locale, "search.deliveryFailed")).catch(() => false);
-        }
+        if (statusMessageId) await editTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, statusMessageId, t(locale, "search.deliveryFailed")).catch(() => false);
+        else await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, t(locale, "search.deliveryFailed")).catch(() => false);
       }
     }
     return;
