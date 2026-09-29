@@ -7,6 +7,7 @@ export async function processDeadLetterBatch(
   batch: MessageBatch<unknown>,
   db: D1Database,
   now: () => string,
+  results?: R2Bucket,
 ): Promise<void> {
   for (const message of batch.messages) {
     if (!isQueueJobMessage(message.body)) {
@@ -28,6 +29,7 @@ export async function processDeadLetterBatch(
       continue;
     }
 
+    const temporaryResultRef = operation?.temporary_result_ref ?? null;
     if (operation?.status === "delivering" && operation.telegram_delivery_status === "sent") {
       await settleReservation(db, message.body.operationId, now());
     } else {
@@ -36,6 +38,7 @@ export async function processDeadLetterBatch(
       }
       await releaseReservation(db, message.body.operationId, now(), "failed", "queue_dead_lettered");
     }
+    if (results && temporaryResultRef?.startsWith("r2:")) await results.delete(temporaryResultRef.slice(3)).catch(() => false);
     await db
       .prepare("UPDATE queue_jobs SET status='dead_lettered', updated_at=?2 WHERE operation_id=?1")
       .bind(message.body.operationId, now())
