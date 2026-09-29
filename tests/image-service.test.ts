@@ -1,5 +1,5 @@
 import { env } from "./test-env";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createAIGateway } from "../src/ai-gateway";
 import { processImageJob } from "../src/image/service";
 import { type ProviderAdapter } from "../src/providers/types";
@@ -35,7 +35,7 @@ describe("image queue lifecycle", () => {
     const { userId, modelId, operationId } = await seedImageOperation(10);
     const gateway = createAIGateway(env.DB, key, [imageAdapter()]);
     const calls: Request[] = [];
-    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => { calls.push(new Request(input, init)); return new Response(JSON.stringify({ ok: true, result: { message_id: 777 } }), { status: 200, headers: { "content-type": "application/json" } }); };
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => { calls.push(new Request(input, init)); return new Response(JSON.stringify({ ok: true, result: { message_id: 777, photo: [{ file_id: "telegram-default" }] } }), { status: 200, headers: { "content-type": "application/json" } }); };
     const result = await processImageJob({ operationId, userId, metadata: { chatId: 123, prompt: "a robot", modelId } }, { db: env.DB, gateway, botToken: "test-token", encryptionKey: key, now: () => "2026-09-28T12:01:00Z", fetchImpl });
     expect(result).toEqual({ ok: true });
     expect(calls).toHaveLength(1);
@@ -45,7 +45,7 @@ describe("image queue lifecycle", () => {
     expect(user?.daily_points_remaining).toBe(40);
     expect(op?.status).toBe("delivering");
     expect(op?.telegram_delivery_status).toBe("sent");
-    expect(op?.temporary_result_ref).toBe("https://cdn.example.com/image.png");
+    expect(op?.temporary_result_ref).toBe("telegram-default");
   });
 
   it("reuses the temporary provider result after Telegram 429 without regenerating", async () => {
@@ -60,29 +60,23 @@ describe("image queue lifecycle", () => {
     expect(providerCalls).toBe(0);
   });
 
-  it("persists binary results and reuses them after Telegram 429", async () => {
+  it("captures the Telegram file_id after delivery without permanent image storage", async () => {
     const { userId, modelId, operationId } = await seedImageOperation(8);
-    const bytes = new Uint8Array([1, 2, 3, 4]);
     let providerCalls = 0;
-    const gateway = createAIGateway(env.DB, key, [{ type: "image_test", async invoke() { providerCalls += 1; return { ok: true, kind: "image", bytes, contentType: "image/png" }; } }]);
-    const stored = new Map<string, Uint8Array>();
-    const results = {
-      put: vi.fn(async (key: string, value: ArrayBuffer | ArrayBufferView) => { stored.set(key, new Uint8Array(value as ArrayBuffer)); }),
-      get: vi.fn(async (key: string) => { const value = stored.get(key); return value ? { arrayBuffer: async () => value.buffer, httpMetadata: { contentType: "image/png" } } : null; }),
-      delete: vi.fn(async (key: string) => { stored.delete(key); }),
-    } as unknown as R2Bucket;
-    const rateLimitedFetch = async () => new Response(JSON.stringify({ ok: false, description: "Too Many Requests", parameters: { retry_after: 1 } }), { status: 429, headers: { "content-type": "application/json" } });
-    const first = await processImageJob({ operationId, userId, metadata: { chatId: 123, prompt: "binary", modelId } }, { db: env.DB, gateway, botToken: "test-token", encryptionKey: key, now: () => "2026-09-28T12:03:00Z", fetchImpl: rateLimitedFetch, results });
-    expect(first).toEqual({ ok: false, retryable: true, code: "telegram_delivery_retry", retryAfterSeconds: 1 });
-    const opAfterFirst = await env.DB.prepare("SELECT temporary_result_ref FROM operations WHERE id=?1").bind(operationId).first<{temporary_result_ref:string|null}>();
-    expect(opAfterFirst?.temporary_result_ref).toBe("r2:image/" + operationId);
-    expect(stored.get("image/" + operationId)).toEqual(bytes);
+    const gateway = createAIGateway(env.DB, key, [{ type: "image_test", async invoke() { providerCalls += 1; return { ok: true, kind: "image", url: "https://cdn.example.com/image.png" }; } }]);
+    const fetchImpl = async () => new Response(JSON.stringify({
+      ok: true,
+      result: { message_id: 778, photo: [{ file_id: "telegram-small" }, { file_id: "telegram-large" }] },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const result = await processImageJob(
+      { operationId, userId, metadata: { chatId: 123, prompt: "file id", modelId } },
+      { db: env.DB, gateway, botToken: "test-token", encryptionKey: key, now: () => "2026-09-28T12:03:00Z", fetchImpl },
+    );
+    expect(result).toEqual({ ok: true });
     expect(providerCalls).toBe(1);
-
-    const successFetch = async () => new Response(JSON.stringify({ ok: true, result: { message_id: 778 } }), { status: 200, headers: { "content-type": "application/json" } });
-    const second = await processImageJob({ operationId, userId, metadata: { chatId: 123, prompt: "binary", modelId } }, { db: env.DB, gateway, botToken: "test-token", encryptionKey: key, now: () => "2026-09-28T12:04:00Z", fetchImpl: successFetch, results });
-    expect(second).toEqual({ ok: true });
-    expect(providerCalls).toBe(1);
+    const op = await env.DB.prepare("SELECT telegram_delivery_status,temporary_result_ref FROM operations WHERE id=?1").bind(operationId).first<{telegram_delivery_status:string;temporary_result_ref:string|null}>();
+    expect(op?.telegram_delivery_status).toBe("sent");
+    expect(op?.temporary_result_ref).toBe("telegram-large");
   });
 
   it("rejects oversized binary image results before Telegram delivery", async () => {
