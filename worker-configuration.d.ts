@@ -1,7 +1,6 @@
 interface Env {
   DB: D1Database;
   AI_JOBS: Queue;
-  RESULTS?: R2Bucket;
   ENVIRONMENT: string;
   TEST_MIGRATIONS: D1Migration[];
   TELEGRAM_BOT_TOKEN?: string;
