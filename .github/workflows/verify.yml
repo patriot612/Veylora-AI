@@ -1,0 +1,22 @@
+name: Verify
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npx wrangler d1 migrations apply veylora-ai --local
+      - run: npx wrangler d1 execute veylora-ai --local --command="SELECT (SELECT COUNT(*) FROM plans) AS plans, (SELECT COUNT(*) FROM families) AS families, (SELECT COUNT(*) FROM system_config) AS config_entries;"
+      - run: npx wrangler deploy --dry-run --outdir=dist

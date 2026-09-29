@@ -1,0 +1,188 @@
+import { resolveModel } from "../models/registry";
+import type { ModelType } from "../models/types";
+import { ProviderGatewayError, type GatewayMessage, type ProviderAdapter } from "../providers/types";
+
+export type GatewayTextRequest = {
+  userId: string;
+  modelId: string;
+  modelType: Extract<ModelType, "chat" | "search">;
+  messages: GatewayMessage[];
+  now: string;
+  timeoutMs?: number;
+};
+
+export type GatewayTextResult = {
+  text: string;
+  providerRequestId?: string;
+  modelId: string;
+};
+
+export type GatewayImageRequest = {
+  userId: string;
+  modelId: string;
+  prompt: string;
+  size?: string;
+  quality?: string;
+  format?: string;
+  config?: Record<string, unknown>;
+  now: string;
+  timeoutMs?: number;
+};
+
+export type GatewayImageResult = {
+  modelId: string;
+  providerRequestId?: string;
+  url?: string;
+  bytes?: Uint8Array;
+  contentType?: string;
+};
+export type GatewayVoiceRequest = {
+  userId: string;
+  modelId: string;
+  input: ArrayBuffer;
+  inputContentType: string;
+  now: string;
+  timeoutMs?: number;
+};
+
+export type GatewayVoiceResult = {
+  modelId: string;
+  bytes: Uint8Array;
+  contentType: string;
+  providerRequestId?: string;
+};
+
+
+export class AIGateway {
+  constructor(
+    private readonly db: D1Database,
+    private readonly encryptionKey: string,
+    private readonly adapters: Map<string, ProviderAdapter>,
+  ) {}
+
+  async generateImage(input: GatewayImageRequest): Promise<GatewayImageResult> {
+    const model = await resolveModel(this.db, {
+      userId: input.userId,
+      modelId: input.modelId,
+      expectedType: "image",
+      now: input.now,
+      credentialEncryptionKey: this.encryptionKey,
+    });
+
+    const adapter = this.adapters.get(model.providerAdapterType);
+    if (!adapter) throw new ProviderGatewayError("provider_unsupported", "Image provider adapter is not configured", false);
+    const controller = new AbortController();
+    const timeout = input.timeoutMs ?? 300_000;
+    const timer = setTimeout(() => controller.abort("provider_timeout"), timeout);
+    try {
+      const response = await adapter.invoke({
+        operationType: "image",
+        providerModelId: model.providerModelId,
+        endpoint: model.endpoint,
+        credential: model.credentialSecret,
+        prompt: input.prompt,
+        config: { ...model.config, ...(input.config ?? {}), size: input.size, quality: input.quality, format: input.format },
+        signal: controller.signal,
+      });
+      if (response.kind !== "image") throw new ProviderGatewayError("provider_invalid_response", "Provider did not return an image", false);
+      if (!response.url && !response.bytes) throw new ProviderGatewayError("provider_invalid_response", "Provider image result is empty", false);
+      return { modelId: model.id, providerRequestId: response.providerRequestId, url: response.url, bytes: response.bytes, contentType: response.contentType };
+    } catch (error) {
+      if (error instanceof ProviderGatewayError) throw error;
+      if (controller.signal.aborted) throw new ProviderGatewayError("provider_timeout", "Provider image request timed out", true, { cause: error });
+      throw new ProviderGatewayError("provider_unavailable", "Provider image request failed", true, { cause: error });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async generateVoiceReply(input: GatewayVoiceRequest): Promise<GatewayVoiceResult> {
+    const model = await resolveModel(this.db, {
+      userId: input.userId,
+      modelId: input.modelId,
+      expectedType: "voice",
+      now: input.now,
+      credentialEncryptionKey: this.encryptionKey,
+    });
+
+    const adapter = this.adapters.get(model.providerAdapterType);
+    if (!adapter) throw new ProviderGatewayError("provider_unsupported", "Voice provider adapter is not configured", false);
+
+    const controller = new AbortController();
+    const timeout = input.timeoutMs ?? 300_000;
+    const timer = setTimeout(() => controller.abort("provider_timeout"), timeout);
+    try {
+      const response = await adapter.invoke({
+        operationType: "voice",
+        providerModelId: model.providerModelId,
+        endpoint: model.endpoint,
+        credential: model.credentialSecret,
+        input: input.input,
+        inputContentType: input.inputContentType,
+        voiceMode: "reply",
+        config: model.config,
+        signal: controller.signal,
+      });
+      if (response.kind !== "binary") {
+        throw new ProviderGatewayError("provider_invalid_response", "Voice provider did not return audio", false);
+      }
+      return {
+        modelId: model.id,
+        bytes: response.bytes,
+        contentType: response.contentType,
+        providerRequestId: response.providerRequestId,
+      };
+    } catch (error) {
+      if (error instanceof ProviderGatewayError) throw error;
+      if (controller.signal.aborted) {
+        throw new ProviderGatewayError("provider_timeout", "Provider voice request timed out", true, { cause: error });
+      }
+      throw new ProviderGatewayError("provider_unavailable", "Provider voice request failed", true, { cause: error });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async generateText(input: GatewayTextRequest): Promise<GatewayTextResult> {
+    const model = await resolveModel(this.db, {
+      userId: input.userId,
+      modelId: input.modelId,
+      expectedType: input.modelType,
+      now: input.now,
+      credentialEncryptionKey: this.encryptionKey,
+    });
+
+    const adapter = this.adapters.get(model.providerAdapterType);
+    if (!adapter) throw new ProviderGatewayError("provider_unsupported", "Provider adapter is not configured", false);
+
+    const controller = new AbortController();
+    const timeout = input.timeoutMs ?? 60_000;
+    const timer = setTimeout(() => controller.abort("provider_timeout"), timeout);
+
+    try {
+      const response = await adapter.invoke({
+        operationType: model.type,
+        providerModelId: model.providerModelId,
+        endpoint: model.endpoint,
+        credential: model.credentialSecret,
+        messages: input.messages,
+        maxOutputTokens: model.maxOutputTokens ?? undefined,
+        config: model.config,
+        signal: controller.signal,
+      });
+
+      if (response.kind !== "text") throw new ProviderGatewayError("provider_invalid_response", "Provider returned an unsupported response", true);
+      return { text: response.text, providerRequestId: response.providerRequestId, modelId: model.id };
+    } catch (error) {
+      if (error instanceof ProviderGatewayError) throw error;
+      if (controller.signal.aborted) throw new ProviderGatewayError("provider_timeout", "Provider request timed out", true, { cause: error });
+      throw new ProviderGatewayError("provider_unavailable", "Provider request failed", true, { cause: error });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export function createAIGateway(db: D1Database, encryptionKey: string, adapters: ProviderAdapter[]): AIGateway {
+  return new AIGateway(db, encryptionKey, new Map(adapters.map((adapter) => [adapter.type, adapter])));
+}
