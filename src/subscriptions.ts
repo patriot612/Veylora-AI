@@ -11,6 +11,10 @@ export type ActivePlan = {
 export async function getActivePlan(db: D1Database, userId: string, now: string): Promise<ActivePlan | null> {
   const row = await db.prepare("SELECT p.id, p.code, p.name, p.duration_days, p.daily_points, p.retention_hours, p.voice_enabled FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.user_id = ?1 AND s.status = 'active' AND s.starts_at <= ?2 AND s.ends_at > ?2 ORDER BY s.ends_at DESC LIMIT 1")
     .bind(userId, now).first<{ id: string; code: string; name: string; duration_days: number; daily_points: number; retention_hours: number; voice_enabled: number }>();
+  const dailyPoints = row?.daily_points ?? 50;
+  await db.prepare(
+    "UPDATE users SET daily_points_remaining=?2,daily_billing_day=?3,updated_at=?4 WHERE id=?1 AND daily_billing_day<>?3",
+  ).bind(userId, dailyPoints, utcPlusThreeDay(now), now).run();
   if (!row) return null;
   return { id: row.id, code: row.code, name: row.name, durationDays: row.duration_days, dailyPoints: row.daily_points, retentionHours: row.retention_hours, voiceEnabled: row.voice_enabled === 1 };
 }
@@ -32,4 +36,11 @@ export async function grantBonusPoints(db: D1Database, userId: string, amount: n
     db.prepare("INSERT INTO point_ledger (id,user_id,source,entry_type,amount,created_at) SELECT ?1,?2,'bonus','grant',?3,?4 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2)").bind(crypto.randomUUID(), userId, amount, now),
   ]);
   return (result[0].meta.changes ?? 0) === 1 && (result[1].meta.changes ?? 0) === 1;
+}
+
+function utcPlusThreeDay(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) throw new Error("invalid_timestamp");
+  date.setUTCHours(date.getUTCHours() + 3);
+  return date.toISOString().slice(0, 10);
 }
