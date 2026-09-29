@@ -198,5 +198,5 @@ function numberValue(value: unknown): number | null {
 }
 
 function isHttpUrl(value: string): boolean {
-  return /^https?:\\/\\//i.test(value);
+  return /^https?:\/\//i.test(value);
 }
