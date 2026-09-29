@@ -116,12 +116,21 @@ export async function editTelegramMessage(
 export async function sendTelegramPhoto(
   botToken: string,
   chatId: number,
-  source: { url?: string; bytes?: Uint8Array; contentType?: string },
+  source: { fileId?: string; url?: string; bytes?: Uint8Array; contentType?: string },
   extra: Record<string, unknown> = {},
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ message_id: number }> {
+  if (source.fileId) {
+    return telegramApi<TelegramPhotoMessage>(
+      botToken,
+      "sendPhoto",
+      { chat_id: chatId, photo: source.fileId, ...extra },
+      fetchImpl,
+    );
+  }
+
   if (source.url) {
-    return telegramApi<{ message_id: number }>(
+    return telegramApi<TelegramPhotoMessage>(
       botToken,
       "sendPhoto",
       { chat_id: chatId, photo: source.url, ...extra },
@@ -147,7 +156,7 @@ export async function sendTelegramPhoto(
     { method: "POST", body: form },
   );
 
-  let body: TelegramResponse<{ message_id: number }> | null = null;
+  let body: TelegramResponse<TelegramPhotoMessage> | null = null;
   try {
     body = await response.json() as TelegramResponse<{ message_id: number }>;
   } catch (error) {
@@ -170,6 +179,11 @@ export async function sendTelegramPhoto(
   }
   return body.result;
 }
+
+type TelegramPhotoMessage = {
+  message_id: number;
+  photo?: Array<{ file_id: string }>;
+};
 
 export async function getTelegramFile(
   botToken: string,
