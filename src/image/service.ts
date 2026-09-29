@@ -1,10 +1,9 @@
 import { getSystemConfig, getSystemConfigInt } from "../config";
-import { createOperation } from "../operations/service";
+import { createOperation, transitionOperation } from "../operations/service";
 import { enqueueHeavyJob } from "../queue/producer";
 import { resolveModel } from "../models/registry";
 import type { AIGateway, GatewayImageResult } from "../ai-gateway";
 import { sendTelegramPhoto } from "../telegram/api";
-import { transitionOperation } from "../operations/service";
 import { TelegramApiError } from "../telegram/api";
 
 export type ImageRequest = {
@@ -30,6 +29,7 @@ export type ImageQueueDeps = {
   encryptionKey: string;
   now: () => string;
   fetchImpl?: typeof fetch;
+  results?: R2Bucket;
 };
 
 export async function handleImageRequest(input: ImageRequest): Promise<{ operationId: string } | { error: string }> {
@@ -119,13 +119,20 @@ export async function processImageJob(message: {
   if (chatId === null) return { ok: false, retryable: false, code: "image_chat_missing" };
 
   const existingRef = operation.temporary_result_ref;
-  if (operation.telegram_delivery_status === "sent" && existingRef) {
-    return { ok: true };
-  }
+  if (operation.telegram_delivery_status === "sent" && existingRef) return { ok: true };
 
   let result: GatewayImageResult;
   try {
-    if (existingRef) {
+    if (existingRef?.startsWith("r2:")) {
+      if (!deps.results) return { ok: false, retryable: false, code: "image_result_storage_unavailable" };
+      const object = await deps.results.get(existingRef.slice(3));
+      if (!object) return { ok: false, retryable: false, code: "image_result_missing" };
+      result = {
+        modelId: operation.model_id,
+        bytes: new Uint8Array(await object.arrayBuffer()),
+        contentType: object.httpMetadata?.contentType ?? "image/png",
+      };
+    } else if (existingRef) {
       result = { modelId: operation.model_id, url: existingRef };
     } else {
       const generation = await deps.gateway.generateImage({
@@ -144,6 +151,15 @@ export async function processImageJob(message: {
           .prepare("UPDATE operations SET temporary_result_ref = ?1, telegram_delivery_status='pending' WHERE id=?2 AND user_id=?3")
           .bind(generation.url, message.operationId, message.userId)
           .run();
+      } else if (generation.bytes && deps.results) {
+        const key = `image/${message.operationId}`;
+        await deps.results.put(key, generation.bytes, {
+          httpMetadata: { contentType: generation.contentType ?? "image/png" },
+        });
+        await deps.db
+          .prepare("UPDATE operations SET temporary_result_ref = ?1, telegram_delivery_status='pending' WHERE id=?2 AND user_id=?3")
+          .bind(`r2:${key}`, message.operationId, message.userId)
+          .run();
       }
     }
   } catch (error) {
@@ -153,9 +169,7 @@ export async function processImageJob(message: {
 
   if (result.bytes) {
     const maxBytes = await getSystemConfigInt(deps.db, "limits.image_bytes", 10 * 1024 * 1024);
-    if (result.bytes.byteLength > maxBytes) {
-      return { ok: false, retryable: false, code: "image_too_large" };
-    }
+    if (result.bytes.byteLength > maxBytes) return { ok: false, retryable: false, code: "image_too_large" };
   }
 
   await transitionOperation(deps.db, {
