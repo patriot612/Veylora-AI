@@ -27,6 +27,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "RESULTS",
+      "bucket_name": "veylora-ai-results"
+    }
+  ],
   "queues": {
     "producers": [
       {
