@@ -73,7 +73,7 @@ export async function sendTelegramMessage(
   text: string,
   extra: Record<string, unknown> = {},
   fetchImpl: typeof fetch = fetch,
-): Promise<{ message_id: number }> {
+): Promise<TelegramPhotoMessage> {
   return telegramApi<{ message_id: number }>(
     botToken,
     "sendMessage",
@@ -158,7 +158,7 @@ export async function sendTelegramPhoto(
 
   let body: TelegramResponse<TelegramPhotoMessage> | null = null;
   try {
-    body = await response.json() as TelegramResponse<{ message_id: number }>;
+    body = await response.json() as TelegramResponse<TelegramPhotoMessage>;
   } catch (error) {
     throw new TelegramApiError("telegram_invalid_response", "sendPhoto", response.status >= 500, undefined, { cause: error });
   }
